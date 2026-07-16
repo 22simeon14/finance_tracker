@@ -81,6 +81,99 @@ A freelancer or self-employed person who wants to organise business-related expe
 
 The user registers, logs in, and obtains access only to their own documents and expenses.
 
+```mermaid
+flowchart TB
+    %% Flow A — Authentication
+    %% MVP only: register / login / session. No admin, social login, 2FA,
+    %% email confirmation, or forgotten-password paths.
+    %% Layout: green centre line = success path. Red = errors to the side.
+    %% Return nodes name the form to reopen; no long crossing arrows.
+
+    start(["START<br/>Open application"])
+
+    subgraph entry["1. Application entry"]
+        direction TB
+        open_app["Open application"]
+        choose{"Register or log in?"}
+    end
+
+    start --> open_app --> choose
+
+    subgraph credentials["2. Credentials"]
+        direction TB
+        register_form["Fill registration form<br/>email · password"]
+        login_form["Fill login form<br/>email · password"]
+        validate{"Credentials valid?"}
+
+        reg_error["Show registration field errors"]
+        login_error["Show invalid credentials error"]
+        return_register(["RETURN TO REGISTER FORM<br/>Correct the highlighted fields"])
+        return_login(["RETURN TO LOGIN FORM<br/>Try again with valid credentials"])
+
+        register_form --> validate
+        login_form --> validate
+        validate -->|NO · register| reg_error
+        validate -->|NO · login| login_error
+        reg_error --> return_register
+        login_error --> return_login
+    end
+
+    choose -->|REGISTER| register_form
+    choose -->|LOG IN| login_form
+
+    subgraph session["3. Authenticated session"]
+        direction TB
+        create_session["Create authenticated session<br/>role USER · own data only"]
+        session_ok{"Session created?"}
+        session_error["Show session error"]
+        return_login_session(["RETURN TO LOGIN FORM<br/>Retry authentication"])
+
+        create_session --> session_ok
+        session_ok -->|NO| session_error
+        session_error --> return_login_session
+    end
+
+    validate -->|YES| create_session
+
+    subgraph access["4. Application access"]
+        direction TB
+        open_dashboard["Open dashboard"]
+        end_ok(["END<br/>Authenticated access granted"])
+
+        open_dashboard --> end_ok
+    end
+
+    session_ok -->|YES| open_dashboard
+
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or session errors.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
+
+    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
+    classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
+    classDef entryAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
+    classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
+    classDef sessionAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
+    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
+
+    class start startNode
+    class open_app entryAction
+    class register_form,login_form formAction
+    class create_session,open_dashboard sessionAction
+    class choose,validate,session_ok decision
+    class reg_error,login_error,session_error error
+    class return_register,return_login,return_login_session restart
+    class end_ok endNode
+    class legend legendBox
+
+    style entry fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
+    style credentials fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
+    style session fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
+    style access fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
+```
+
 ### Flow B — Document processing
 
 The user uploads a document, the system processes it, the user reviews the proposed fields, and an expense is saved only after explicit approval.
@@ -88,6 +181,133 @@ The user uploads a document, the system processes it, the user reviews the propo
 ### Flow C — Expense exploration
 
 The user opens the expense list, filters expenses, views details, edits existing records, and sees aggregated information in the dashboard.
+
+```mermaid
+flowchart TB
+    %% Flow C — Expense exploration and dashboard
+    %% Expense fields in MVP: merchant · date · total · currency · category
+    %% derived from a saved Document. Dashboard summaries are calculated
+    %% from saved expenses; they are not a separate source of truth.
+    %% Layout: green centre line = success path. Side branches = filters,
+    %% empty results, edit/delete alternatives. No long crossing arrows.
+
+    start(["START<br/>Authenticated user"])
+
+    subgraph dashboard["1. Dashboard"]
+        direction TB
+        open_dash["Open dashboard"]
+        load_own["Load only the current user's<br/>saved expenses"]
+        view_summary["View expense summary<br/>calculated from saved expenses"]
+        show_widgets["Show period total · by category ·<br/>by merchant · recently added documents"]
+        go_list["Open expense list"]
+
+        open_dash --> load_own --> view_summary --> show_widgets --> go_list
+    end
+
+    start --> open_dash
+
+    subgraph listing["2. Expense list and filters"]
+        direction TB
+        list_view["Show expense list<br/>merchant · date · total · currency · category"]
+        apply_filters["Apply optional filters<br/>date from/to · category · merchant"]
+        filters_valid{"Filters valid?"}
+        filter_error["Show filter validation errors"]
+        return_filters(["RETURN TO FILTERS<br/>Correct date range or criteria"])
+        show_results{"Matching expenses found?"}
+        empty_state["Show empty state<br/>No expenses found"]
+        clear_filters["Clear filters"]
+        return_list_empty(["RETURN TO LIST<br/>After clearing filters"])
+        results["View matching expenses"]
+
+        list_view --> apply_filters --> filters_valid
+        filters_valid -->|NO| filter_error
+        filter_error --> return_filters
+        filters_valid -->|YES| show_results
+        show_results -->|NO| empty_state
+        empty_state --> clear_filters --> return_list_empty
+        show_results -->|YES| results
+    end
+
+    go_list --> list_view
+
+    subgraph details["3. Expense details"]
+        direction TB
+        open_details["Open expense details"]
+        show_doc["Show confirmed fields beside<br/>the original uploaded Document"]
+        user_action{"User action"}
+
+        open_details --> show_doc --> user_action
+    end
+
+    results --> open_details
+
+    subgraph actions["4. Edit, delete or return"]
+        direction TB
+        edit_form["Edit expense fields<br/>merchant · date · total · currency · category"]
+        edit_valid{"Edited data valid?"}
+        edit_error["Show field-level errors"]
+        return_edit(["RETURN TO EDIT FORM<br/>Correct the highlighted fields"])
+        save_edit["Save updated expense"]
+        confirm_delete{"Confirm delete?"}
+        cancel_delete(["RETURN TO DETAILS<br/>Deletion cancelled"])
+        delete_expense["Delete expense"]
+        refresh_stats["Recalculate dashboard summary<br/>from remaining saved expenses"]
+        return_list["Return to expense list"]
+        end_ok(["END<br/>Exploration complete"])
+
+        edit_form --> edit_valid
+        edit_valid -->|NO| edit_error
+        edit_error --> return_edit
+        edit_valid -->|YES| save_edit
+        save_edit --> refresh_stats
+
+        confirm_delete -->|NO| cancel_delete
+        confirm_delete -->|YES| delete_expense
+        delete_expense --> refresh_stats
+
+        refresh_stats --> return_list
+        return_list --> end_ok
+    end
+
+    user_action -->|EDIT| edit_form
+    user_action -->|DELETE| confirm_delete
+    user_action -->|RETURN| return_list
+
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation errors. Grey/orange branches are empty results or cancelled delete.<br/>Dashboard statistics are always recalculated from saved expenses, never stored as the source of truth."]
+
+    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
+    classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
+    classDef dashAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
+    classDef listAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
+    classDef detailAction fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef saveAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
+    classDef emptyAlt fill:#fff7ed,stroke:#f97316,color:#9a3412
+    classDef pause fill:#e0f2fe,stroke:#0284c7,color:#075985
+    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef deleteAction fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
+
+    class start startNode
+    class open_dash,load_own,view_summary,show_widgets,go_list dashAction
+    class list_view,apply_filters,results listAction
+    class open_details,show_doc,edit_form detailAction
+    class save_edit,refresh_stats,return_list saveAction
+    class filters_valid,show_results,user_action,edit_valid,confirm_delete decision
+    class filter_error,edit_error error
+    class return_filters,return_edit,cancel_delete restart
+    class empty_state,clear_filters,return_list_empty emptyAlt
+    class delete_expense deleteAction
+    class end_ok endNode
+    class legend legendBox
+
+    style dashboard fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
+    style listing fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
+    style details fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
+    style actions fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
+```
 
 ---
 
@@ -464,4 +684,5 @@ The following principles are accepted for the project:
 
 | Date | Change |
 |---|---|
+| 2026-07-16 | Added Flow A authentication and Flow C expense exploration activity diagrams. |
 | 2026-07-14 | Created the initial architecture draft and defined Flow B for document processing. |

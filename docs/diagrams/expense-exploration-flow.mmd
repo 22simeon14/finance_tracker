@@ -1,0 +1,124 @@
+flowchart TB
+    %% Flow C — Expense exploration and dashboard
+    %% Expense fields in MVP: merchant · date · total · currency · category
+    %% derived from a saved Document. Dashboard summaries are calculated
+    %% from saved expenses; they are not a separate source of truth.
+    %% Layout: green centre line = success path. Side branches = filters,
+    %% empty results, edit/delete alternatives. No long crossing arrows.
+
+    start(["START<br/>Authenticated user"])
+
+    subgraph dashboard["1. Dashboard"]
+        direction TB
+        open_dash["Open dashboard"]
+        load_own["Load only the current user's<br/>saved expenses"]
+        view_summary["View expense summary<br/>calculated from saved expenses"]
+        show_widgets["Show period total · by category ·<br/>by merchant · recently added documents"]
+        go_list["Open expense list"]
+
+        open_dash --> load_own --> view_summary --> show_widgets --> go_list
+    end
+
+    start --> open_dash
+
+    subgraph listing["2. Expense list and filters"]
+        direction TB
+        list_view["Show expense list<br/>merchant · date · total · currency · category"]
+        apply_filters["Apply optional filters<br/>date from/to · category · merchant"]
+        filters_valid{"Filters valid?"}
+        filter_error["Show filter validation errors"]
+        return_filters(["RETURN TO FILTERS<br/>Correct date range or criteria"])
+        show_results{"Matching expenses found?"}
+        empty_state["Show empty state<br/>No expenses found"]
+        clear_filters["Clear filters"]
+        return_list_empty(["RETURN TO LIST<br/>After clearing filters"])
+        results["View matching expenses"]
+
+        list_view --> apply_filters --> filters_valid
+        filters_valid -->|NO| filter_error
+        filter_error --> return_filters
+        filters_valid -->|YES| show_results
+        show_results -->|NO| empty_state
+        empty_state --> clear_filters --> return_list_empty
+        show_results -->|YES| results
+    end
+
+    go_list --> list_view
+
+    subgraph details["3. Expense details"]
+        direction TB
+        open_details["Open expense details"]
+        show_doc["Show confirmed fields beside<br/>the original uploaded Document"]
+        user_action{"User action"}
+
+        open_details --> show_doc --> user_action
+    end
+
+    results --> open_details
+
+    subgraph actions["4. Edit, delete or return"]
+        direction TB
+        edit_form["Edit expense fields<br/>merchant · date · total · currency · category"]
+        edit_valid{"Edited data valid?"}
+        edit_error["Show field-level errors"]
+        return_edit(["RETURN TO EDIT FORM<br/>Correct the highlighted fields"])
+        save_edit["Save updated expense"]
+        confirm_delete{"Confirm delete?"}
+        cancel_delete(["RETURN TO DETAILS<br/>Deletion cancelled"])
+        delete_expense["Delete expense"]
+        refresh_stats["Recalculate dashboard summary<br/>from remaining saved expenses"]
+        return_list["Return to expense list"]
+        end_ok(["END<br/>Exploration complete"])
+
+        edit_form --> edit_valid
+        edit_valid -->|NO| edit_error
+        edit_error --> return_edit
+        edit_valid -->|YES| save_edit
+        save_edit --> refresh_stats
+
+        confirm_delete -->|NO| cancel_delete
+        confirm_delete -->|YES| delete_expense
+        delete_expense --> refresh_stats
+
+        refresh_stats --> return_list
+        return_list --> end_ok
+    end
+
+    user_action -->|EDIT| edit_form
+    user_action -->|DELETE| confirm_delete
+    user_action -->|RETURN| return_list
+
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation errors. Grey/orange branches are empty results or cancelled delete.<br/>Dashboard statistics are always recalculated from saved expenses, never stored as the source of truth."]
+
+    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
+    classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
+    classDef dashAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
+    classDef listAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
+    classDef detailAction fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef saveAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
+    classDef emptyAlt fill:#fff7ed,stroke:#f97316,color:#9a3412
+    classDef pause fill:#e0f2fe,stroke:#0284c7,color:#075985
+    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef deleteAction fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
+
+    class start startNode
+    class open_dash,load_own,view_summary,show_widgets,go_list dashAction
+    class list_view,apply_filters,results listAction
+    class open_details,show_doc,edit_form detailAction
+    class save_edit,refresh_stats,return_list saveAction
+    class filters_valid,show_results,user_action,edit_valid,confirm_delete decision
+    class filter_error,edit_error error
+    class return_filters,return_edit,cancel_delete restart
+    class empty_state,clear_filters,return_list_empty emptyAlt
+    class delete_expense deleteAction
+    class end_ok endNode
+    class legend legendBox
+
+    style dashboard fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
+    style listing fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
+    style details fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
+    style actions fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
