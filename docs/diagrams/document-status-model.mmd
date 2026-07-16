@@ -1,0 +1,13 @@
+stateDiagram-v2
+    [*] --> UPLOADED: valid upload stored
+    UPLOADED --> PROCESSING: processing starts
+    PROCESSING --> REVIEW_REQUIRED: full or partial extraction
+    PROCESSING --> PROCESSING_FAILED: processing cannot produce a result
+    PROCESSING_FAILED --> PROCESSING: retry
+    PROCESSING_FAILED --> REVIEW_REQUIRED: continue manually
+    PROCESSING_FAILED --> DELETED: user deletes document
+    REVIEW_REQUIRED --> REVIEW_REQUIRED: edit, validation error, or save retry
+    REVIEW_REQUIRED --> SAVED: user approves valid data
+    REVIEW_REQUIRED --> DELETED: user deletes pending document
+    SAVED --> [*]
+    DELETED --> [*]
