@@ -290,6 +290,7 @@ flowchart TB
     end
 
     review_required --> show_review
+    continue_manual --> show_review
 
     subgraph save["4. Final save"]
         direction TB
@@ -300,16 +301,17 @@ flowchart TB
         success(["SUCCESS<br/>Expense appears in details, list,<br/>filters and dashboard"])
         save_error["Keep review data and<br/>show retry option"]
         return_review_2(["RETURN TO REVIEW<br/>Retry after the save error"])
-        legend["Reading rule: follow the blue/green centre line for the normal path.<br/>Red branches are errors. Orange branches are manual alternatives.<br/>Restart and return nodes name the step where the flow continues; no long backward arrows are drawn."]
 
         create_expense --> save_check
         save_check -->|YES| set_saved
-        set_saved --> open_details --> success --> legend
+        set_saved --> open_details --> success
         save_check -->|NO| save_error
         save_error --> return_review_2
     end
 
     validate -->|YES| create_expense
+
+    legend["Reading rule: follow the blue/green centre line for the normal path.<br/>Red branches are errors. Orange branches are manual alternatives.<br/>Restart and return nodes name the step where the flow continues; no long backward arrows are drawn."]
 
     %% Node colours matching the SVG palette
     classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
