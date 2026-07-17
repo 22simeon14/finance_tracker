@@ -1,0 +1,37 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+**/secrets/
+**/credentials/
+**/credentials*.json
+**/secrets*.json
+
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519
+
+# Real uploaded receipts, invoices and personal financial data
+uploads/
+storage/private/
+data/private/
+documents/private/
+
+# Local databases
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# Local exports and backups
+exports/private/
+backups/
+**/*.bak
+**/*.dump
+
+# Temporary files that may contain document data
+tmp/
+temp/

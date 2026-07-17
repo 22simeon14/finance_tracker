@@ -1,0 +1,105 @@
+---
+alwaysApply: true
+---
+```md
+---
+alwaysApply: true
+---
+
+# Development Workflow
+
+## Before editing
+
+Before changing code:
+
+1. Read the relevant files.
+2. Inspect nearby implementations and tests.
+3. Understand the existing naming, architecture, and conventions.
+4. Identify the smallest coherent change that satisfies the request.
+
+Do not assume a file, class, endpoint, table, or dependency exists without checking.
+
+For tasks involving architecture, database schemas, authentication, public APIs, dependencies, security, or many files:
+
+- begin with a short implementation plan;
+- list the files likely to change;
+- explain important trade-offs;
+- do not start a broad rewrite without explicit approval.
+
+Small and isolated changes may be implemented directly.
+
+## During implementation
+
+- Implement only the requested scope.
+- Prefer small, reviewable changes.
+- Do not rewrite unrelated code.
+- Do not rename or move files unless necessary.
+- Preserve existing public behavior unless the task explicitly changes it.
+- Follow existing project conventions before introducing new ones.
+- Keep functions and classes focused.
+- Prefer straightforward code over unnecessary abstraction.
+- Avoid premature generalization.
+- Do not add an interface with only one implementation unless it creates a real boundary or testing benefit.
+- Do not add design patterns only to demonstrate that a pattern exists.
+- Do not add fallback behavior that hides errors.
+- Do not suppress exceptions without logging or handling them properly.
+- Do not leave placeholder implementations presented as completed work.
+
+Do not add dependencies silently. Before adding one, explain:
+
+- what problem it solves;
+- why the standard library or an existing dependency is insufficient;
+- what maintenance or security cost it introduces.
+
+## Commands and repository safety
+
+- Never run destructive commands without explicit approval.
+- Never delete files merely because they appear unused without verifying references.
+- Never use `git reset --hard`, `git clean`, force push, or destructive database commands without approval.
+- Do not modify secrets, credentials, production configuration, or files outside the workspace.
+- Do not commit, push, merge, deploy, or publish unless explicitly requested.
+
+Run the narrowest relevant checks first.
+
+Examples:
+
+- a focused unit test before the complete test suite;
+- linting only affected modules before the full repository;
+- compilation before starting the application.
+
+Never claim that a test, build, migration, or command succeeded unless it was actually executed successfully.
+
+## After editing
+
+After completing a task, provide:
+
+1. A short summary of what changed.
+2. A list of changed files and their roles.
+3. The important implementation decisions.
+4. Commands that were executed.
+5. Test, build, and lint results.
+6. Remaining limitations or follow-up work.
+7. A concise explanation of the main code flow.
+
+When code is educationally important, explain:
+
+- where execution starts;
+- how data moves between components;
+- which layer owns each responsibility;
+- why the chosen implementation is appropriate;
+- what alternatives were deliberately avoided.
+
+Do not overwhelm the user with explanations of obvious syntax unless requested.
+
+## Bug fixing
+
+When fixing a bug:
+
+1. Reproduce or clearly identify the failure.
+2. Explain the root cause.
+3. Make the smallest correct fix.
+4. Add or update a regression test when practical.
+5. Verify that the fix does not break adjacent behavior.
+
+Do not merely patch the visible symptom when the underlying cause is known.
+```

@@ -1,0 +1,19 @@
+{
+    "autoRun": {
+      "allow_instructions": [
+        "Allow read-only commands that inspect files, directories, Git status, Git diffs, and project configuration.",
+        "Allow running local unit tests, integration tests, linters, formatters, type checks, and build commands.",
+        "Allow starting local development services that do not modify production or external resources."
+      ],
+      "block_instructions": [
+        "Require approval before deleting files or directories.",
+        "Require approval before git push, force push, reset --hard, clean, rebase, merge, or checkout operations that may discard changes.",
+        "Require approval before committing changes.",
+        "Require approval before applying database migrations or commands that modify or delete database data.",
+        "Require approval before Docker commands that delete containers, images, networks, or volumes.",
+        "Require approval before modifying files outside the current workspace.",
+        "Require approval before accessing production systems, cloud resources, remote databases, deployment services, or external secrets.",
+        "Require approval before installing system-wide packages or running commands with administrator privileges."
+      ]
+    }
+  }

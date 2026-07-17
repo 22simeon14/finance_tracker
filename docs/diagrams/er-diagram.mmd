@@ -1,0 +1,59 @@
+erDiagram
+    users ||--o{ documents : owns
+    documents ||--o| document_extractions : has
+    documents ||--o| expenses : may_produce
+    categories ||--o{ expenses : classifies
+    categories ||--o{ document_extractions : "optional proposed"
+
+    users {
+        BIGINT id PK
+        VARCHAR email UK
+        VARCHAR password_hash
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    documents {
+        BIGINT id PK
+        BIGINT user_id FK
+        VARCHAR status
+        VARCHAR storage_path
+        VARCHAR original_filename
+        VARCHAR mime_type
+        INTEGER file_size_bytes
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    document_extractions {
+        BIGINT id PK
+        BIGINT document_id FK_UK
+        TEXT raw_ocr_text
+        VARCHAR proposed_merchant
+        DATE proposed_date
+        DECIMAL proposed_amount
+        CHAR proposed_currency
+        BIGINT proposed_category_id FK
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    categories {
+        BIGINT id PK
+        VARCHAR name UK
+        VARCHAR slug UK
+        BOOLEAN is_active
+        TIMESTAMP created_at
+    }
+
+    expenses {
+        BIGINT id PK
+        BIGINT document_id FK_UK
+        BIGINT category_id FK
+        VARCHAR merchant
+        DATE expense_date
+        DECIMAL total_amount
+        CHAR currency
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }

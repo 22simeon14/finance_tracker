@@ -1,0 +1,95 @@
+```md
+---
+alwaysApply: true
+---
+
+# Finance Tracker — Project Context
+
+## Project purpose
+
+This is a serious educational and portfolio project called AI Finance Tracker.
+
+The primary MVP workflow is:
+
+1. The user uploads a receipt or invoice.
+2. OCR and/or AI extracts candidate expense data.
+3. The user reviews and edits the extracted information.
+4. The user explicitly approves the result.
+5. The approved expense is persisted.
+6. The user can view, filter, and analyze expenses.
+
+The target user is an individual tracking personal expenses.
+
+## MVP boundaries
+
+Receipts and invoices are treated as source documents for expenses, not as full accounting objects.
+
+Unless the project documentation explicitly changes the scope, the MVP does not include:
+
+- line-item extraction;
+- formal accounting or bookkeeping;
+- bank integrations;
+- a mobile application;
+- microservices;
+- Kubernetes;
+- a custom-trained AI model;
+- an administrator profile;
+- multiple user roles.
+
+The only application role is `USER`.
+
+Do not implement speculative functionality outside the requested MVP task.
+
+## Architecture principles
+
+- Prefer a simple modular monolith for the MVP.
+- Avoid microservices, event-driven infrastructure, distributed systems, and unnecessary abstractions.
+- Keep responsibilities separated, but do not create layers or interfaces without a concrete reason.
+- Prefer clear and boring solutions over clever solutions.
+- Do not introduce a new framework, dependency, architectural pattern, or infrastructure component without explaining why it is needed.
+- Do not change an existing architectural decision silently.
+
+Before making an architectural change, inspect the relevant documentation, especially `architecture.md`, requirements documents, ADRs, and the existing source structure.
+
+If the requested change conflicts with existing documentation or architecture, point out the conflict before implementing it.
+
+## Domain rules
+
+- An uploaded document is not automatically an approved expense.
+- OCR and AI results are untrusted candidate data.
+- Extracted data must be validated before it reaches the domain or persistence layer.
+- The user must be able to review and correct extracted data.
+- An expense should only become approved after an explicit user action.
+- Preserve the original uploaded document or a reference to it when required by the architecture.
+- Monetary values must use an exact decimal representation, never binary floating-point types.
+- Never allow an AI model to generate or execute arbitrary SQL.
+- Future natural-language queries must be converted to validated structured filters or commands.
+
+## Source of truth
+
+Use the following priority when making decisions:
+
+1. The user's current explicit request.
+2. Accepted architectural decisions and project documentation.
+3. Existing code and tests.
+4. These Cursor rules.
+5. General framework conventions.
+
+Do not invent missing business requirements. State important assumptions clearly.
+
+## Communication
+
+Communicate explanations and summaries to the user in Bulgarian.
+
+Use English for:
+
+- source code;
+- identifiers;
+- filenames;
+- API fields;
+- database names;
+- commit messages;
+- technical documentation unless the existing document is written in Bulgarian.
+
+The user is learning software engineering. Do not only produce code. Help the user understand the implementation and the reasoning behind important decisions.
+```

@@ -1,0 +1,134 @@
+```md
+---
+description: "Backend quality, data integrity, security, testing, database, file upload, OCR and AI extraction rules for Finance Tracker"
+alwaysApply: false
+---
+
+# Quality, Security and Data Integrity
+
+Apply these rules when working with backend code, APIs, authentication, persistence, file uploads, OCR, AI extraction, testing, or financial data.
+
+## Application boundaries
+
+Validate data at system boundaries:
+
+- HTTP requests;
+- uploaded files;
+- OCR responses;
+- AI model responses;
+- database input;
+- configuration and environment variables.
+
+Do not rely only on frontend validation.
+
+Keep transport concerns, business logic, and persistence responsibilities separate.
+
+Controllers or route handlers should:
+
+- parse and validate requests;
+- call application use cases or services;
+- translate results into HTTP responses.
+
+They should not contain substantial business logic.
+
+## Financial data
+
+- Use decimal or fixed-precision numeric types for money.
+- Define currency explicitly where relevant.
+- Avoid implicit rounding.
+- Make rounding rules explicit and test them.
+- Validate that amounts are non-negative or positive according to the use case.
+- Do not silently convert malformed amounts to zero.
+- Use clear date and timezone handling.
+- Do not confuse the document upload date, document issue date, expense date, and approval date.
+
+## Authentication and ownership
+
+Every operation on user-owned data must verify ownership on the server.
+
+Never trust a user ID supplied by the client when the authenticated identity is available.
+
+A user must not be able to:
+
+- read another user's documents;
+- modify another user's expenses;
+- approve another user's extraction;
+- infer another user's information through error messages or identifiers.
+
+## Uploaded documents
+
+For uploaded receipts and invoices:
+
+- validate allowed content types;
+- validate actual file content when practical, not only the filename extension;
+- enforce a maximum file size;
+- generate server-controlled storage names;
+- prevent path traversal;
+- do not execute uploaded content;
+- do not expose local storage paths through the API;
+- handle duplicate and failed uploads explicitly;
+- avoid storing files directly in the database unless the architecture explicitly requires it.
+
+Do not log complete receipt or invoice contents.
+
+## OCR and AI
+
+Treat OCR and AI output as untrusted external input.
+
+- Validate output against an explicit schema.
+- Handle missing, malformed, and contradictory fields.
+- Preserve confidence or extraction metadata when useful.
+- Never invent missing financial values.
+- Clearly distinguish extracted values from user-confirmed values.
+- Do not automatically approve an expense because extraction succeeded.
+- Do not place model output directly into SQL, shell commands, file paths, or executable code.
+- Never provide an AI model with unrestricted database execution access.
+- Natural-language requests must map to a limited, validated set of filters, fields, operations, and sort options.
+
+The system must remain usable when OCR or AI extraction fails.
+
+## Error handling and logging
+
+- Return stable and meaningful error responses.
+- Do not expose stack traces, secrets, internal paths, SQL, or provider credentials.
+- Log enough context to diagnose failures without logging sensitive document data.
+- Use structured logging when supported by the selected stack.
+- Distinguish validation failures, authentication failures, authorization failures, missing resources, conflicts, and unexpected failures.
+- Do not catch broad exceptions unless they are translated, logged, or intentionally propagated.
+
+## Database changes
+
+- Use versioned migrations.
+- Do not edit an already-applied migration unless the project is still explicitly in a disposable prototype stage.
+- Prefer reversible migrations.
+- Explain destructive or irreversible changes before applying them.
+- Add database constraints for important invariants where appropriate.
+- Do not rely exclusively on application-level checks for data integrity.
+- Avoid N+1 queries and unbounded result sets.
+- Paginate endpoints that may grow substantially.
+
+## Testing
+
+Add or update tests for:
+
+- business rules;
+- validation;
+- authorization and ownership;
+- financial calculations;
+- approval transitions;
+- OCR/AI response parsing;
+- previously reported bugs.
+
+Prefer tests that verify observable behavior.
+
+Do not mock domain logic merely to make a test pass.
+
+Use integration tests for important boundaries such as:
+
+- API to database;
+- persistence mappings;
+- authentication and authorization;
+- file upload processing.
+
+Tests must be deterministic and must not depend on real external AI or OCR services unless explicitly marked as external integration tests.
+```

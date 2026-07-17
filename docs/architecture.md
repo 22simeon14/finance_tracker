@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-07-14  
+> **Last updated:** 2026-07-17  
 > This document evolves together with the implementation. It records decisions that are currently accepted and separates them from open questions.
 
 ## 1. Product vision
@@ -20,6 +20,10 @@ flowchart LR
     D --> E[View, filter and analyse expenses]
 ```
 
+
+
+
+
 ## 2. Problem being solved
 
 Financial information from receipts and invoices is usually unstructured, scattered across paper documents, images, PDFs, and email attachments. Manual entry is slow and discourages consistent expense tracking.
@@ -34,6 +38,8 @@ The system is not intended to be accounting software. In the MVP, receipts and i
 
 ## 3. Target users
 
+
+
 ### Primary MVP user
 
 An individual who wants to track personal expenses without manually entering every record.
@@ -45,6 +51,8 @@ Examples include students, young professionals, and users who already keep or ph
 A freelancer or self-employed person who wants to organise business-related expense documents. Tax, VAT, approval, and accounting workflows are outside the MVP.
 
 ## 4. MVP scope
+
+
 
 ### Included
 
@@ -62,6 +70,8 @@ A freelancer or self-employed person who wants to organise business-related expe
 - A basic dashboard with aggregated expense information.
 - Basic automated tests and Docker-based local setup.
 
+
+
 ### Explicitly excluded
 
 - Administrator profile and admin panel.
@@ -75,7 +85,11 @@ A freelancer or self-employed person who wants to organise business-related expe
 - Natural-language querying in the first release.
 - Guaranteed perfect recognition of every document format.
 
+
+
 ## 5. Core user journeys
+
+
 
 ### Flow A — Authentication
 
@@ -173,6 +187,10 @@ flowchart TB
     style session fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
     style access fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
 ```
+
+
+
+
 
 ### Flow B — Document processing
 
@@ -309,9 +327,15 @@ flowchart TB
     style actions fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
 ```
 
+
+
 ---
 
+
+
 # 6. Flow B — Document processing
+
+
 
 ## 6.1 Goal
 
@@ -323,6 +347,8 @@ Convert a user-provided receipt or invoice into a valid, user-approved expense w
 - The user is allowed to upload a document.
 - The selected file uses a supported format and is within the configured size limit.
 
+
+
 ## 6.3 Successful path
 
 1. The user opens the upload page and selects a file.
@@ -333,11 +359,11 @@ Convert a user-provided receipt or invoice into a valid, user-approved expense w
 6. The document status changes to `PROCESSING`.
 7. OCR extracts raw text from the document.
 8. The extraction component converts the raw text into proposed structured fields:
-   - merchant;
-   - date;
-   - total amount;
-   - currency;
-   - category.
+  - merchant;
+  - date;
+  - total amount;
+  - currency;
+  - category.
 9. The backend validates and normalises the proposed values.
 10. The document status changes to `REVIEW_REQUIRED`.
 11. The frontend displays the original document next to an editable form.
@@ -345,14 +371,18 @@ Convert a user-provided receipt or invoice into a valid, user-approved expense w
 13. The user explicitly approves the data.
 14. The backend validates the corrected data again.
 15. In one consistent save operation, the backend:
-    - creates the expense;
+  - creates the expense;
     - links it to the document and owner;
     - stores the confirmed values;
     - changes the document status to `SAVED`.
 16. The user is redirected to the saved expense details.
 17. The new expense becomes visible in the expense list, filters, and dashboard calculations.
 
+
+
 ## 6.4 Alternative and failure paths
+
+
 
 ### Invalid file before upload
 
@@ -390,6 +420,8 @@ Examples:
 - the date cannot be parsed;
 - the currency is unsupported;
 - the merchant name is missing.
+
+
 
 ### User leaves the review page
 
@@ -577,9 +609,27 @@ flowchart TB
     style save fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
 ```
 
+
+
+
+
 ## 6.6 Document status model
 
-The following status names are a preliminary domain model. Their exact implementation can change when the database model is designed.
+Persisted document statuses for the MVP:
+
+
+| Status              | Meaning                                                                   |
+| ------------------- | ------------------------------------------------------------------------- |
+| `UPLOADED`          | File stored; processing not started or about to start                     |
+| `PROCESSING`        | OCR / extraction running                                                  |
+| `REVIEW_REQUIRED`   | Ready for user review (full, partial, or empty manual form)               |
+| `PROCESSING_FAILED` | Automatic processing failed; user may retry, continue manually, or delete |
+| `SAVED`             | User approved; an `expenses` row exists                                   |
+
+
+`DELETED` is **not** a persisted status. Pending document deletion is a **hard delete** of the `documents` row (cascading `document_extractions`) and removal of the stored file.
+
+When an expense is hard-deleted in Flow C, the linked document returns to `REVIEW_REQUIRED` so the user can re-approve or delete the pending document. The original file remains available.
 
 ```mermaid
 stateDiagram-v2
@@ -589,13 +639,17 @@ stateDiagram-v2
     PROCESSING --> PROCESSING_FAILED: processing cannot produce a result
     PROCESSING_FAILED --> PROCESSING: retry
     PROCESSING_FAILED --> REVIEW_REQUIRED: continue manually
-    PROCESSING_FAILED --> DELETED: user deletes document
+    PROCESSING_FAILED --> [*]: hard delete pending document and file
     REVIEW_REQUIRED --> REVIEW_REQUIRED: edit, validation error, or save retry
     REVIEW_REQUIRED --> SAVED: user approves valid data
-    REVIEW_REQUIRED --> DELETED: user deletes pending document
+    REVIEW_REQUIRED --> [*]: hard delete pending document and file
+    SAVED --> REVIEW_REQUIRED: expense hard-deleted in Flow C
     SAVED --> [*]
-    DELETED --> [*]
 ```
+
+
+
+
 
 ## 6.7 Functional rules
 
@@ -609,34 +663,253 @@ stateDiagram-v2
 8. Pending and failed documents are excluded from dashboard calculations.
 9. The original document and the confirmed structured data remain linked.
 10. Technical error details are logged, while the user receives a safe and understandable message.
+11. MVP uses hard delete only (no soft delete / `deleted_at`).
+12. Flow C expense deletion hard-deletes the expense and sets the document status back to `REVIEW_REQUIRED`.
+
+
 
 ## 6.8 Required fields before approval
 
-The exact database constraints will be decided later. For the MVP, the expected minimum is:
+Before an expense may be created, the confirmed values must satisfy:
 
-- expense date;
-- total amount greater than zero;
-- supported currency;
-- category;
-- authenticated owner.
+- `expense_date` present;
+- `total_amount` greater than zero;
+- `currency` in `{EUR, USD, GBP}`;
+- `category_id` referencing an active category;
+- authenticated owner via `documents.user_id`.
 
-Merchant may remain optional when it cannot be recognised or is not present on the document.
+`merchant` may remain null when it cannot be recognised or is not present on the document.
 
-## 6.9 Preliminary domain concepts
+## 6.9 Domain entities and database model
 
-### Document
+PostgreSQL is the target database. All primary and foreign keys use `BIGINT` identity columns.
 
-Represents the uploaded original file and its processing lifecycle. It belongs to one user and has a processing status.
+### Table responsibilities
 
-### Extraction result
 
-Represents automatically proposed values and possibly the raw OCR text. It is not trusted as final financial data.
+| Table                  | Responsibility                                                          |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `users`                | Authentication identity and account credentials                         |
+| `documents`            | Uploaded file metadata and processing lifecycle status                  |
+| `document_extractions` | Untrusted OCR/AI proposed fields for one document (review input only)   |
+| `categories`           | Reusable category labels for filtering and analytics                    |
+| `expenses`             | User-approved financial record; source of truth for lists and dashboard |
 
-### Expense
 
-Represents the user-approved financial record used by lists, filters, and dashboard calculations.
+Ownership of an expense is derived as `expenses.document_id → documents.user_id`. There is no `expenses.user_id` and no `users.role` column in the MVP.
 
-Separating `Document` from `Expense` prevents failed or unapproved uploads from appearing as real expenses.
+### Entity-relationship diagram
+
+Source file: [diagrams/er-diagram.mmd](diagrams/er-diagram.mmd)
+
+```mermaid
+erDiagram
+    users ||--o{ documents : owns
+    documents ||--o| document_extractions : has
+    documents ||--o| expenses : may_produce
+    categories ||--o{ expenses : classifies
+    categories ||--o{ document_extractions : "optional proposed"
+
+    users {
+        BIGINT id PK
+        VARCHAR email UK
+        VARCHAR password_hash
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    documents {
+        BIGINT id PK
+        BIGINT user_id FK
+        VARCHAR status
+        VARCHAR storage_path
+        VARCHAR original_filename
+        VARCHAR mime_type
+        INTEGER file_size_bytes
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    document_extractions {
+        BIGINT id PK
+        BIGINT document_id FK_UK
+        TEXT raw_ocr_text
+        VARCHAR proposed_merchant
+        DATE proposed_date
+        DECIMAL proposed_amount
+        CHAR proposed_currency
+        BIGINT proposed_category_id FK
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+
+    categories {
+        BIGINT id PK
+        VARCHAR name UK
+        VARCHAR slug UK
+        BOOLEAN is_active
+        TIMESTAMP created_at
+    }
+
+    expenses {
+        BIGINT id PK
+        BIGINT document_id FK_UK
+        BIGINT category_id FK
+        VARCHAR merchant
+        DATE expense_date
+        DECIMAL total_amount
+        CHAR currency
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+```
+
+
+
+
+
+### Column summaries
+
+
+
+#### `users`
+
+
+| Column          | Type         | Nullable | Constraints  |
+| --------------- | ------------ | -------- | ------------ |
+| `id`            | BIGINT       | no       | PK, identity |
+| `email`         | VARCHAR(255) | no       | UNIQUE       |
+| `password_hash` | VARCHAR(255) | no       |              |
+| `created_at`    | TIMESTAMP    | no       |              |
+| `updated_at`    | TIMESTAMP    | no       |              |
+
+
+
+
+#### `documents`
+
+
+| Column              | Type         | Nullable | Constraints                                                               |
+| ------------------- | ------------ | -------- | ------------------------------------------------------------------------- |
+| `id`                | BIGINT       | no       | PK, identity                                                              |
+| `user_id`           | BIGINT       | no       | FK → `users(id)` ON DELETE CASCADE                                        |
+| `status`            | VARCHAR(32)  | no       | `UPLOADED`, `PROCESSING`, `REVIEW_REQUIRED`, `PROCESSING_FAILED`, `SAVED` |
+| `storage_path`      | VARCHAR(500) | no       |                                                                           |
+| `original_filename` | VARCHAR(255) | no       |                                                                           |
+| `mime_type`         | VARCHAR(100) | no       |                                                                           |
+| `file_size_bytes`   | INTEGER      | no       | CHECK `> 0`                                                               |
+| `created_at`        | TIMESTAMP    | no       |                                                                           |
+| `updated_at`        | TIMESTAMP    | no       |                                                                           |
+
+
+Indexes: `(user_id, status)`, `(user_id, created_at DESC)`.
+
+
+
+#### `document_extractions`
+
+
+| Column                 | Type          | Nullable | Constraints                                    |
+| ---------------------- | ------------- | -------- | ---------------------------------------------- |
+| `id`                   | BIGINT        | no       | PK, identity                                   |
+| `document_id`          | BIGINT        | no       | FK → `documents(id)` ON DELETE CASCADE; UNIQUE |
+| `raw_ocr_text`         | TEXT          | yes      |                                                |
+| `proposed_merchant`    | VARCHAR(255)  | yes      |                                                |
+| `proposed_date`        | DATE          | yes      |                                                |
+| `proposed_amount`      | DECIMAL(12,2) | yes      |                                                |
+| `proposed_currency`    | CHAR(3)       | yes      | when set: `EUR`, `USD`, or `GBP`               |
+| `proposed_category_id` | BIGINT        | yes      | FK → `categories(id)` ON DELETE SET NULL       |
+| `created_at`           | TIMESTAMP     | no       |                                                |
+| `updated_at`           | TIMESTAMP     | no       |                                                |
+
+
+On processing retry, this single row is updated or replaced. No extraction history table in the MVP.
+
+
+
+#### `categories`
+
+
+| Column       | Type         | Nullable | Constraints    |
+| ------------ | ------------ | -------- | -------------- |
+| `id`         | BIGINT       | no       | PK, identity   |
+| `name`       | VARCHAR(100) | no       | UNIQUE         |
+| `slug`       | VARCHAR(100) | no       | UNIQUE         |
+| `is_active`  | BOOLEAN      | no       | default `true` |
+| `created_at` | TIMESTAMP    | no       |                |
+
+
+Categories are seeded at deploy time. Inactive categories may remain on historical expenses but must not be selectable for new or edited expenses.
+
+
+
+#### `expenses`
+
+
+| Column         | Type          | Nullable | Constraints                                     |
+| -------------- | ------------- | -------- | ----------------------------------------------- |
+| `id`           | BIGINT        | no       | PK, identity                                    |
+| `document_id`  | BIGINT        | no       | FK → `documents(id)` ON DELETE RESTRICT; UNIQUE |
+| `category_id`  | BIGINT        | no       | FK → `categories(id)`                           |
+| `merchant`     | VARCHAR(255)  | yes      |                                                 |
+| `expense_date` | DATE          | no       |                                                 |
+| `total_amount` | DECIMAL(12,2) | no       | CHECK `> 0`                                     |
+| `currency`     | CHAR(3)       | no       | `EUR`, `USD`, or `GBP`                          |
+| `created_at`   | TIMESTAMP     | no       |                                                 |
+| `updated_at`   | TIMESTAMP     | no       |                                                 |
+
+
+Indexes: unique on `document_id`; `(expense_date)`; `(category_id)`; `(merchant)`. Owner filtering always joins `documents.user_id`.
+
+
+
+### Cardinalities
+
+
+| Relationship                  | Cardinality |
+| ----------------------------- | ----------- |
+| User → Document               | 1 : N       |
+| Document → DocumentExtraction | 1 : 0..1    |
+| Document → Expense            | 1 : 0..1    |
+| Category → Expense            | 1 : N       |
+| DocumentExtraction → Category | N : 0..1    |
+
+
+
+
+### Database-enforceable invariants
+
+1. Every document has a user.
+2. At most one document extraction per document.
+3. At most one expense per document.
+4. Every expense references an existing document and category.
+5. `expenses.total_amount > 0`.
+6. `documents.file_size_bytes > 0`.
+7. Unique `users.email`, `categories.name`, `categories.slug`.
+8. Hard-deleting a document cascades to its extraction.
+9. Optional CHECK: `currency IN ('EUR','USD','GBP')` and the same for non-null `proposed_currency`.
+
+
+
+### Application-enforced business rules
+
+These must be enforced in application transactions and validation (not only by FK/CHECK):
+
+1. Creating or updating `document_extractions` must never insert an `expenses` row.
+2. An expense is created only after explicit user approval, in one transaction that validates confirmed fields, inserts the expense, and sets `documents.status = SAVED`.
+3. Document status transitions follow the status model (for example, no jump from `UPLOADED` to `SAVED`).
+4. An expense may exist only when `documents.status = SAVED`; after successful approval, `SAVED` implies an expense exists.
+5. No expense exists while status is `UPLOADED`, `PROCESSING`, `REVIEW_REQUIRED`, or `PROCESSING_FAILED`.
+6. Dashboard and list queries use `expenses` only; pending and failed documents are excluded.
+7. Owner isolation: load documents and expenses only where `documents.user_id` equals the current user.
+8. Currency allowlist: only `EUR`, `USD`, `GBP`.
+9. New and edited expenses must use a category with `is_active = true`.
+10. Failed save must roll back so no partial expense remains.
+11. Pending document delete hard-deletes the document (cascading extraction) and removes the stored file; no expense exists yet.
+12. Flow C expense delete hard-deletes the expense and sets the document to `REVIEW_REQUIRED` (file kept).
+13. AI free-text category suggestions are mapped to `proposed_category_id` when possible; otherwise left null.
+
+
 
 ## 6.10 Completion criteria for Flow B
 
@@ -651,23 +924,37 @@ Flow B is complete when a user can:
 7. see the saved expense in the expense list and dashboard;
 8. never see an unapproved document counted as an expense.
 
+
+
 ## 6.11 Open implementation decisions
 
-These questions are deliberately postponed until the relevant architecture and technology phases:
+These questions remain open until the relevant implementation phase:
 
 - Exact supported file types and maximum file size.
 - Whether PDF support includes only digital PDFs or also scanned PDFs.
 - Whether processing is synchronous or performed by a background job.
 - Which OCR engine or service is used.
 - Which AI extraction approach is used.
-- Whether raw OCR text is stored and for how long.
+- Whether raw OCR text is retained long-term and for how long.
 - File storage location: local volume, object storage, or cloud service.
 - Retry limits and timeout behaviour.
-- Retention and deletion policy for original files.
-- Exact category set and whether categories are configurable.
+- Exact seeded category `name` / `slug` pairs (a provisional seed exists in `db/migrations/002_seed_categories.sql` and may be refined).
+- Whether an empty `document_extractions` row is created on manual-continue-after-failure, or review treats a missing extraction as an empty form.
 - Whether field-level confidence scores are introduced after the MVP.
+- ORM / application framework choice (SQL migrations under `db/migrations/` are the schema source of truth until then).
+
+Resolved for MVP database design:
+
+- Five tables: `users`, `documents`, `document_extractions`, `categories`, `expenses`.
+- BIGINT identity keys; PostgreSQL.
+- Currencies: `EUR`, `USD`, `GBP`.
+- Hard delete only; no soft delete.
+- No `users.role`; no `expenses.user_id`.
+- Flow C expense hard-delete returns the document to `REVIEW_REQUIRED`.
 
 ---
+
+
 
 # 7. Initial architectural principles
 
@@ -680,9 +967,15 @@ The following principles are accepted for the project:
 - **No premature overengineering:** infrastructure and AI complexity are added only when justified by a real requirement.
 - **Documentation follows reality:** this document must be updated when implementation decisions change.
 
+
+
 # 8. Change log
 
-| Date | Change |
-|---|---|
-| 2026-07-16 | Added Flow A authentication and Flow C expense exploration activity diagrams. |
-| 2026-07-14 | Created the initial architecture draft and defined Flow B for document processing. |
+
+| Date       | Change                                                                                                                             |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-17 | Defined MVP relational model (users, documents, document_extractions, categories, expenses), ER diagram, and application DB rules. |
+| 2026-07-16 | Added Flow A authentication and Flow C expense exploration activity diagrams.                                                      |
+| 2026-07-14 | Created the initial architecture draft and defined Flow B for document processing.                                                 |
+
+

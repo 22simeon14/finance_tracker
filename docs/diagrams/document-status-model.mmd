@@ -5,9 +5,9 @@ stateDiagram-v2
     PROCESSING --> PROCESSING_FAILED: processing cannot produce a result
     PROCESSING_FAILED --> PROCESSING: retry
     PROCESSING_FAILED --> REVIEW_REQUIRED: continue manually
-    PROCESSING_FAILED --> DELETED: user deletes document
+    PROCESSING_FAILED --> [*]: hard delete pending document and file
     REVIEW_REQUIRED --> REVIEW_REQUIRED: edit, validation error, or save retry
     REVIEW_REQUIRED --> SAVED: user approves valid data
-    REVIEW_REQUIRED --> DELETED: user deletes pending document
+    REVIEW_REQUIRED --> [*]: hard delete pending document and file
+    SAVED --> REVIEW_REQUIRED: expense hard-deleted in Flow C
     SAVED --> [*]
-    DELETED --> [*]

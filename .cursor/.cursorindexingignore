@@ -1,0 +1,29 @@
+# Build outputs
+dist/
+build/
+out/
+target/
+bin/
+obj/
+
+# Test and analysis output
+coverage/
+test-results/
+reports/
+logs/
+
+# Generated source and documentation
+generated/
+**/*.generated.*
+**/*.min.js
+**/*.map
+
+# IDE and operating-system metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local application runtime data
+runtime/
+work/
