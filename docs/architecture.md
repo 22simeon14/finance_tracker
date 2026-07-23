@@ -941,7 +941,6 @@ These questions remain open until the relevant implementation phase:
 - Exact seeded category `name` / `slug` pairs (a provisional seed exists in `db/migrations/002_seed_categories.sql` and may be refined).
 - Whether an empty `document_extractions` row is created on manual-continue-after-failure, or review treats a missing extraction as an empty form.
 - Whether field-level confidence scores are introduced after the MVP.
-- ORM / application framework choice (SQL migrations under `db/migrations/` are the schema source of truth until then).
 
 Resolved for MVP database design:
 
@@ -951,6 +950,13 @@ Resolved for MVP database design:
 - Hard delete only; no soft delete.
 - No `users.role`; no `expenses.user_id`.
 - Flow C expense hard-delete returns the document to `REVIEW_REQUIRED`.
+
+Resolved for MVP technology stack:
+- Backend: Java 21+ + Spring Boot 3 (REST JSON API).
+- API authentication: JWT bearer (Spring Security).
+- Validation at API boundaries: Jakarta Bean Validation on DTOs.
+- Persistence: Spring Data JPA (Hibernate), with schema controlled by SQL migrations in `db/migrations/` (Hibernate should not generate DDL).
+- Frontend: Vite + plain JavaScript (hash routing + `fetch`).
 
 ---
 
@@ -977,5 +983,6 @@ The following principles are accepted for the project:
 | 2026-07-17 | Defined MVP relational model (users, documents, document_extractions, categories, expenses), ER diagram, and application DB rules. |
 | 2026-07-16 | Added Flow A authentication and Flow C expense exploration activity diagrams.                                                      |
 | 2026-07-14 | Created the initial architecture draft and defined Flow B for document processing.                                                 |
+| 2026-07-21 | Chosen tech stack: Java + Spring Boot + Spring Data JPA; frontend Vite + plain JavaScript.                                         |
 
 

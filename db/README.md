@@ -44,6 +44,6 @@ KEEP_CONTAINER=1 bash db/verify_migrations.sh
 docker exec -it finance_tracker_verify_pg psql -U postgres -d finance_tracker_verify
 ```
 
-ORM models are deferred until the application framework is chosen. The SQL migrations are the schema source of truth until then.
+The SQL migrations are the schema source of truth. Spring Data JPA entities are added in later application steps; Hibernate must not generate DDL (`ddl-auto=none`).
 
 See `docs/architecture.md` section 6.9 for table responsibilities, invariants, and application business rules.
