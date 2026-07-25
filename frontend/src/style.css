@@ -49,3 +49,54 @@ button {
   padding: 0.5rem 1rem;
   cursor: pointer;
 }
+
+.auth-card,
+.auth-form {
+  margin-top: 2rem;
+  padding: 1.25rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.auth-form input {
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.form-error {
+  margin: 0;
+  color: #b00020;
+  font-weight: 600;
+}
+
+.auth-switch {
+  margin-top: 1rem;
+}
+
+.account-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.account-status {
+  font-weight: 600;
+}
+
