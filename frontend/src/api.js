@@ -16,7 +16,11 @@ export async function api(path, options = {}) {
     headers,
   });
 
-  if (response.status === 401 && !path.startsWith('/auth/login')) {
+  if (
+    response.status === 401 &&
+    !path.startsWith('/auth/login') &&
+    !path.startsWith('/auth/register')
+  ) {
     clearToken();
   }
 
