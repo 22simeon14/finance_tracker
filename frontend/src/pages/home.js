@@ -1,7 +1,8 @@
 /**
- * Main Responsibility: Home page UI — account status and backend health check.
+ * Main Responsibility: Home page UI — account, categories proof, and health check.
  *
  * Shows login/register links when logged out, or email + logout when logged in.
+ * After a successful /auth/me, loads GET /categories (JWT-protected) and lists names.
  * Health uses plain fetch("/health") (proxied by Vite) instead of api(), because
  * it is public and does not need a Bearer token.
  */
@@ -21,6 +22,12 @@ export function renderHomePage(root) {
         <div id="account-actions" class="account-actions"></div>
       </section>
 
+      <section id="categories-section" class="categories-card" hidden>
+        <h2>Categories</h2>
+        <ul id="categories-list" class="categories-list"></ul>
+        <p id="categories-status" class="categories-status"></p>
+      </section>
+
       <section class="health-card">
         <h2>Backend status</h2>
         <p id="health-status" class="health-status">Checking...</p>
@@ -31,8 +38,35 @@ export function renderHomePage(root) {
 
   const accountStatusEl = root.querySelector('#account-status');
   const accountActionsEl = root.querySelector('#account-actions');
+  const categoriesSectionEl = root.querySelector('#categories-section');
+  const categoriesListEl = root.querySelector('#categories-list');
+  const categoriesStatusEl = root.querySelector('#categories-status');
   const statusEl = root.querySelector('#health-status');
   const refreshBtn = root.querySelector('#refresh-health');
+
+  function hideCategories() {
+    categoriesSectionEl.hidden = true;
+    categoriesListEl.innerHTML = '';
+    categoriesStatusEl.textContent = '';
+  }
+
+  async function loadCategories() {
+    categoriesSectionEl.hidden = false;
+    categoriesListEl.innerHTML = '';
+    categoriesStatusEl.textContent = 'Loading...';
+
+    try {
+      const categories = await api('/categories');
+      categoriesStatusEl.textContent = '';
+      // Simple name list — proof that the JWT-protected endpoint works from the UI.
+      categoriesListEl.innerHTML = categories
+        .map((category) => `<li>${category.name}</li>`)
+        .join('');
+    } catch (error) {
+      categoriesListEl.innerHTML = '';
+      categoriesStatusEl.textContent = 'Could not load categories';
+    }
+  }
 
   async function loadAccount() {
     if (!isLoggedIn()) {
@@ -41,12 +75,13 @@ export function renderHomePage(root) {
         <a href="#/login">Log in</a>
         <a href="#/register">Register</a>
       `;
+      hideCategories();
       return;
     }
 
     try {
       const me = await api('/auth/me');
-      accountStatusEl.textContent = `Logged in as ${me.email}`;
+        accountStatusEl.textContent = `Logged in as ${me.email}`;
       accountActionsEl.innerHTML = `
         <button type="button" id="logout-btn">Log out</button>
       `;
@@ -54,6 +89,7 @@ export function renderHomePage(root) {
         clearToken();
         navigate('/login');
       });
+      await loadCategories();
     } catch (error) {
       // api() already cleared an invalid token on 401.
       accountStatusEl.textContent = 'Session expired — please log in again';
@@ -61,6 +97,7 @@ export function renderHomePage(root) {
         <a href="#/login">Log in</a>
         <a href="#/register">Register</a>
       `;
+      hideCategories();
     }
   }
 

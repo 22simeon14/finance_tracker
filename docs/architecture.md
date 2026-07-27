@@ -102,6 +102,7 @@ MVP only: register / login / logout (client-side token clear). No admin, social 
 - `POST /auth/register` — public; success `201` with JWT.
 - `POST /auth/login` — public; success `200` with JWT.
 - `GET /auth/me` — protected; returns authenticated user `id` and `email`.
+- `GET /categories` — protected; returns active categories `id`, `name`, `slug`.
 - `GET /health` — public.
 - All other API endpoints require authentication by default.
 - Passwords are stored only as BCrypt hashes (`users.password_hash`); plaintext passwords never leave the register/login request.
