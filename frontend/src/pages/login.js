@@ -1,3 +1,9 @@
+/**
+ * Main Responsibility: Login page — POST /auth/login, store JWT, go home.
+ *
+ * On success stores the token via auth.js and navigates to "#/".
+ * Shows the backend error message under the form on failure.
+ */
 import { api } from '../api.js';
 import { setToken } from '../auth.js';
 import { navigate } from '../router.js';

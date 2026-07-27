@@ -11,6 +11,12 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Main Responsibility: Turn auth-related exceptions into simple JSON error bodies.
+ *
+ * Validation errors include a "fields" map (field name → message).
+ * ResponseStatusException becomes { "error": "reason" } with the matching HTTP status.
+ */
 @RestControllerAdvice
 public class AuthExceptionHandler {
 

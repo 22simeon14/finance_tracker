@@ -1,3 +1,9 @@
+/**
+ * Main Responsibility: Register page — POST /auth/register, store JWT, go home.
+ *
+ * Browser minlength="8" matches backend RegisterRequest validation.
+ * On success the new account is logged in immediately (token in localStorage).
+ */
 import { api } from '../api.js';
 import { setToken } from '../auth.js';
 import { navigate } from '../router.js';

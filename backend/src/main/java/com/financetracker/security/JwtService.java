@@ -12,6 +12,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Date;
 
+/**
+ * Main Responsibility: Create and validate JWT access tokens.
+ *
+ * Used by AuthService (issue token on register/login) and JwtAuthFilter (read token).
+ * Tokens use HS256. Claims: subject = user id, custom claim "email".
+ */
 @Service
 public class JwtService {
 
@@ -36,6 +42,9 @@ public class JwtService {
         }
     }
 
+    /**
+     * Build a signed JWT: subject = userId, claim "email", issued-at and expiration.
+     */
     public String createToken(Long userId, String email) {
         Date now = new Date();
         Date expiresAt = new Date(now.getTime() + expirationMs);
@@ -57,6 +66,10 @@ public class JwtService {
         return parseClaims(token).get("email", String.class);
     }
 
+    /**
+     * Returns false for expired, tampered, or otherwise invalid tokens
+     * instead of throwing (callers treat that as "not authenticated").
+     */
     public boolean isValid(String token) {
         try {
             parseClaims(token);
@@ -66,6 +79,7 @@ public class JwtService {
         }
     }
 
+    /** Parse and verify signature; throws if the token is invalid or expired. */
     private Claims parseClaims(String token) {
         return Jwts.parser()
                 .verifyWith(secretKey)

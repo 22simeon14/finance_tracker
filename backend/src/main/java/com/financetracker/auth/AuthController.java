@@ -10,6 +10,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Main Responsibility: HTTP endpoints for register, login, and current-user info.
+ *
+ * Register and login are public (see SecurityConfig). GET /auth/me requires a valid JWT.
+ */
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
@@ -32,6 +37,7 @@ public class AuthController {
         return authService.login(request);
     }
 
+    /** Returns the user from the JWT SecurityContext (not from the request body). */
     @GetMapping("/me")
     public MeResponse me() {
         return new MeResponse(currentUser.getUserId(), currentUser.getEmail());

@@ -6,6 +6,12 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * Main Responsibility: Read the current authenticated user from the SecurityContext.
+ *
+ * Controllers call this instead of parsing the JWT again. Throws 401 if missing
+ * or if the principal is not a UserPrincipal (e.g. anonymous request).
+ */
 @Component
 public class CurrentUser {
 
@@ -17,6 +23,9 @@ public class CurrentUser {
         return getPrincipal().email();
     }
 
+    /**
+     * Fail fast with 401 when there is no JWT-based principal for this request.
+     */
     public UserPrincipal getPrincipal() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null

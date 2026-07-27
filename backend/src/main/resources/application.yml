@@ -1,11 +1,17 @@
+# Main Responsibility: Spring Boot runtime settings (DB, server port, JWT).
+# Secrets and host-specific values come from environment variables / .env.
+
 spring:
   datasource:
+    # JDBC URL, user, and password are injected at runtime (see docker-compose / .env).
     url: ${SPRING_DATASOURCE_URL}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
   jpa:
     hibernate:
+      # Schema is owned by SQL migrations in db/migrations — do not let Hibernate change it.
       ddl-auto: none
+    # Avoid lazy DB access outside a transaction after the request controller returns.
     open-in-view: false
 
 server:
@@ -14,4 +20,5 @@ server:
 app:
   jwt:
     secret: ${JWT_SECRET}
+    # 86400000 ms = 24 hours token lifetime.
     expiration-ms: 86400000

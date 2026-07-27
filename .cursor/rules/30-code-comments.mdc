@@ -1,0 +1,81 @@
+---
+description: Educational English code comments with Main Responsibility headers
+alwaysApply: true
+---
+
+# Code Comments Standard
+
+This educational comment standard **overrides** the usual preference to avoid verbose comments in this repo.
+
+When creating or editing source/config files, add comments in this style by default. Do not wait for the user to ask.
+
+## Language
+
+- Comments in **English only**.
+- Use short, simple words.
+- Explain purpose and intent, not a line-by-line rewrite of the code.
+
+## Required: Main Responsibility header
+
+Every source or config file must start with a clearly marked **Main Responsibility** block.
+
+Java (class-level):
+
+```java
+/**
+ * Main Responsibility: Create and validate JWT access tokens.
+ *
+ * Used by AuthService (issue token) and JwtAuthFilter (read token).
+ */
+```
+
+JavaScript (file-level, top of file):
+
+```js
+/**
+ * Main Responsibility: Shared HTTP helper for backend API calls.
+ *
+ * Adds JSON headers and Bearer token when present.
+ */
+```
+
+YAML / Compose / env / Dockerfile (`#`):
+
+```yaml
+# Main Responsibility: Local multi-container setup (Postgres + backend).
+```
+
+XML (`<!-- -->`):
+
+```xml
+<!--
+  Main Responsibility: Maven build and dependencies for the Spring Boot backend.
+-->
+```
+
+JSON files cannot have comments — skip body comments; document nearby (e.g. vite.config.js).
+
+## Method / function comments
+
+Add a short comment (1–3 lines) when behavior is non-obvious, security-related, or project-specific.
+
+**Comment when:** JWT build/parse, filter chain order, CORS, password hashing, 401 handling, proxy paths, config quirks.
+
+**Skip when:** getters/setters, trivial DTOs, Spring Data method names that already say what they do (`findByEmail`).
+
+## What not to do
+
+- No TODOs, future-feature comments, or commented-out code.
+- No Bulgarian in source comments.
+- Do not comment every line inside a method.
+- Do not change logic while only adding comments.
+
+## Examples
+
+```java
+// GOOD — explains why, not what
+// Derive a fixed-length key so short local JWT_SECRET values still work with HS256.
+
+// BAD — restates the code
+// Hash the secret with SHA-256.
+```

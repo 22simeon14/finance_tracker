@@ -1,3 +1,10 @@
+/**
+ * Main Responsibility: Home page UI — account status and backend health check.
+ *
+ * Shows login/register links when logged out, or email + logout when logged in.
+ * Health uses plain fetch("/health") (proxied by Vite) instead of api(), because
+ * it is public and does not need a Bearer token.
+ */
 import { api } from '../api.js';
 import { clearToken, isLoggedIn } from '../auth.js';
 import { navigate } from '../router.js';
@@ -48,6 +55,7 @@ export function renderHomePage(root) {
         navigate('/login');
       });
     } catch (error) {
+      // api() already cleared an invalid token on 401.
       accountStatusEl.textContent = 'Session expired — please log in again';
       accountActionsEl.innerHTML = `
         <a href="#/login">Log in</a>

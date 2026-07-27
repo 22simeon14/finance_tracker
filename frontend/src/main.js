@@ -1,3 +1,8 @@
+/**
+ * Main Responsibility: App entry point — wire CSS and hash routes to page renderers.
+ *
+ * Unknown routes fall through to the home page.
+ */
 import './style.css';
 import { startRouter } from './router.js';
 import { renderHomePage } from './pages/home.js';

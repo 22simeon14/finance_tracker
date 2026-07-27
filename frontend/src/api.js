@@ -1,3 +1,10 @@
+/**
+ * Main Responsibility: Shared HTTP helper for backend API calls.
+ *
+ * Adds JSON Content-Type when there is a body, and Bearer token when logged in.
+ * On 401 (except login), clears the stored token so the UI can show logged-out state.
+ * Failed responses throw an Error with status and optional JSON body attached.
+ */
 import { clearToken, getToken } from './auth.js';
 
 export async function api(path, options = {}) {
@@ -16,11 +23,8 @@ export async function api(path, options = {}) {
     headers,
   });
 
-  if (
-    response.status === 401 &&
-    !path.startsWith('/auth/login') &&
-    !path.startsWith('/auth/register')
-  ) {
+  // Do not clear token on failed login — the user may still have an old session token.
+  if (response.status === 401 && !path.startsWith('/auth/login')) {
     clearToken();
   }
 

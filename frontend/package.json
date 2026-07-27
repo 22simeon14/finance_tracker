@@ -2,6 +2,7 @@
   "name": "finance-tracker-frontend",
   "private": true,
   "version": "0.0.1",
+  "description": "Vite SPA for Finance Tracker. See vite.config.js for Main Responsibility and proxy setup (JSON cannot hold comments).",
   "type": "module",
   "scripts": {
     "dev": "vite",

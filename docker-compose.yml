@@ -1,3 +1,7 @@
+# Main Responsibility: Local multi-container setup (Postgres + backend).
+# Postgres mounts ./db/migrations into docker-entrypoint-initdb.d (runs on first start only).
+# Backend waits until Postgres is healthy before starting.
+
 services:
   postgres:
     image: postgres:16
@@ -9,7 +13,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # Persist DB data across container restarts.
       - postgres_data:/var/lib/postgresql/data
+      # Read-only: SQL files run once when the data volume is empty.
       - ./db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -29,6 +35,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       UPLOAD_DIR: ${UPLOAD_DIR}
     volumes:
+      # Persist uploaded files across backend container restarts.
       - uploads_data:${UPLOAD_DIR}
     depends_on:
       postgres:

@@ -8,6 +8,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * Main Responsibility: Register and login business logic, then issue a JWT.
+ *
+ * Passwords are stored only as BCrypt hashes. Email is normalized (trim + lowercase)
+ * before lookup so "User@Mail.com" and "user@mail.com" match the same account.
+ */
 @Service
 public class AuthService {
 
@@ -34,6 +40,7 @@ public class AuthService {
 
         User user = new User();
         user.setEmail(email);
+        // Never store the plain password — only the BCrypt hash.
         user.setPasswordHash(passwordEncoder.encode(request.password()));
         userRepository.save(user);
 
@@ -57,6 +64,9 @@ public class AuthService {
         return email.trim().toLowerCase();
     }
 
+    /**
+     * Same message for "user missing" and "wrong password" so callers cannot tell them apart.
+     */
     private static ResponseStatusException invalidCredentials() {
         return new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password");
     }

@@ -11,6 +11,12 @@ import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 
+/**
+ * Main Responsibility: JPA entity mapped to the "users" table.
+ *
+ * Stores email and password_hash only (never a plain password).
+ * created_at / updated_at are set by JPA lifecycle callbacks, not by callers.
+ */
 @Entity
 @Table(name = "users")
 public class User {
@@ -31,6 +37,7 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    /** Set both timestamps when the row is first inserted. */
     @PrePersist
     void onCreate() {
         LocalDateTime now = LocalDateTime.now();
@@ -38,6 +45,7 @@ public class User {
         updatedAt = now;
     }
 
+    /** Refresh updated_at on every update. */
     @PreUpdate
     void onUpdate() {
         updatedAt = LocalDateTime.now();
