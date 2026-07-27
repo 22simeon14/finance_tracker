@@ -1,90 +1,49 @@
 flowchart TB
-    %% Flow A — Authentication
-    %% MVP only: register / login / session. No admin, social login, 2FA,
-    %% email confirmation, or forgotten-password paths.
-    %% Layout: green centre line = success path. Red = errors to the side.
-    %% Return nodes name the form to reopen; no long crossing arrows.
+    %% Flow A — Authentication overview
+    %% Detail: register-flow.mmd and login-flow.mmd
+    %% Layout: green centre line = success path. Side branches = choose path.
+    %% No long crossing arrows.
 
     start(["START<br/>Open application"])
 
     subgraph entry["1. Application entry"]
         direction TB
-        open_app["Open application"]
+        openApp["Open application"]
         choose{"Register or log in?"}
+
+        openApp --> choose
     end
 
-    start --> open_app --> choose
+    start --> openApp
 
-    subgraph credentials["2. Credentials"]
+    subgraph paths["2. Choose path"]
         direction TB
-        register_form["Fill registration form<br/>email · password"]
-        login_form["Fill login form<br/>email · password"]
-        validate{"Credentials valid?"}
+        goRegister["Follow Register flow<br/>see register-flow.mmd"]
+        goLogin["Follow Login flow<br/>see login-flow.mmd"]
+        endOk(["END<br/>JWT stored · authenticated access"])
 
-        reg_error["Show registration field errors"]
-        login_error["Show invalid credentials error"]
-        return_register(["RETURN TO REGISTER FORM<br/>Correct the highlighted fields"])
-        return_login(["RETURN TO LOGIN FORM<br/>Try again with valid credentials"])
-
-        register_form --> validate
-        login_form --> validate
-        validate -->|NO · register| reg_error
-        validate -->|NO · login| login_error
-        reg_error --> return_register
-        login_error --> return_login
+        goRegister --> endOk
+        goLogin --> endOk
     end
 
-    choose -->|REGISTER| register_form
-    choose -->|LOG IN| login_form
+    choose -->|REGISTER| goRegister
+    choose -->|LOG IN| goLogin
 
-    subgraph session["3. Authenticated session"]
-        direction TB
-        create_session["Create authenticated session<br/>role USER · own data only"]
-        session_ok{"Session created?"}
-        session_error["Show session error"]
-        return_login_session(["RETURN TO LOGIN FORM<br/>Retry authentication"])
-
-        create_session --> session_ok
-        session_ok -->|NO| session_error
-        session_error --> return_login_session
-    end
-
-    validate -->|YES| create_session
-
-    subgraph access["4. Application access"]
-        direction TB
-        open_dashboard["Open dashboard"]
-        end_ok(["END<br/>Authenticated access granted"])
-
-        open_dashboard --> end_ok
-    end
-
-    session_ok -->|YES| open_dashboard
-
-    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or session errors.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
+    legend["Reading rule: this overview only chooses the path.<br/>Register and login details, including error returns, are in the separate diagrams."]
 
     classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
-    classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
     classDef entryAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
-    classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
-    classDef sessionAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef pathAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
     classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
-    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
     classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
     classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
 
     class start startNode
-    class open_app entryAction
-    class register_form,login_form formAction
-    class create_session,open_dashboard sessionAction
-    class choose,validate,session_ok decision
-    class reg_error,login_error,session_error error
-    class return_register,return_login,return_login_session restart
-    class end_ok endNode
+    class openApp entryAction
+    class goRegister,goLogin pathAction
+    class choose decision
+    class endOk endNode
     class legend legendBox
 
     style entry fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
-    style credentials fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
-    style session fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
-    style access fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
+    style paths fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534

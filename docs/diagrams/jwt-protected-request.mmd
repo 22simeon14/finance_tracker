@@ -1,0 +1,26 @@
+sequenceDiagram
+    %% Protected API request with JWT bearer token
+    participant Browser
+    participant JwtFilter as JwtAuthFilter
+    participant JwtService
+    participant SecurityContext
+    participant SecurityRules as SecurityConfig
+    participant Controller
+    participant CurrentUser
+
+    Browser->>JwtFilter: Request with Bearer JWT
+    JwtFilter->>JwtService: Validate token
+    alt Token is valid
+        JwtService-->>JwtFilter: User ID and email
+        JwtFilter->>SecurityContext: Store UserPrincipal
+        JwtFilter->>SecurityRules: Continue request
+        SecurityRules->>Controller: Authenticated request allowed
+        Controller->>CurrentUser: Get authenticated user
+        CurrentUser->>SecurityContext: Read UserPrincipal
+        SecurityContext-->>CurrentUser: User ID and email
+        CurrentUser-->>Controller: Current user
+        Controller-->>Browser: Protected response
+    else Token missing or invalid
+        JwtFilter->>SecurityRules: Continue without authentication
+        SecurityRules-->>Browser: 401 Unauthorized
+    end

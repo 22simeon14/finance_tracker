@@ -93,79 +93,100 @@ A freelancer or self-employed person who wants to organise business-related expe
 
 ### Flow A — Authentication
 
-The user registers, logs in, and obtains access only to their own documents and expenses.
+The user registers or logs in with email and password, receives a JWT, and thereafter accesses only their own documents and expenses. There is no server-side session table: identity for later requests comes from a signed bearer token.
+
+MVP only: register / login / logout (client-side token clear). No admin, social login, 2FA, email confirmation, or forgotten-password paths.
+
+#### Authentication contract
+
+- `POST /auth/register` — public; success `201` with JWT.
+- `POST /auth/login` — public; success `200` with JWT.
+- `GET /auth/me` — protected; returns authenticated user `id` and `email`.
+- `GET /health` — public.
+- All other API endpoints require authentication by default.
+- Passwords are stored only as BCrypt hashes (`users.password_hash`); plaintext passwords never leave the register/login request.
+- JWT claims include user id (`sub`), email, issued-at, and expiration. JWT validity is 24 hours.
+- The frontend stores the JWT (local storage) and sends `Authorization: Bearer <token>` on protected requests.
+- Logout clears the token in the browser; the backend does not revoke tokens server-side in the MVP.
+- Resource ownership is derived from the authenticated user id in the JWT (via Spring Security context / `CurrentUser`), never from a client-supplied `userId` body field. There is no `users.role` column.
+
+Overview source file: [diagrams/authentication-flow.mmd](diagrams/authentication-flow.mmd) (choose register or login). Detail diagrams below.
+
+#### Register flow
+
+Source file: [diagrams/register-flow.mmd](diagrams/register-flow.mmd)
 
 ```mermaid
 flowchart TB
-    %% Flow A — Authentication
-    %% MVP only: register / login / session. No admin, social login, 2FA,
-    %% email confirmation, or forgotten-password paths.
+    %% Flow A — Register
+    %% Public POST /auth/register; success returns JWT (no server session).
     %% Layout: green centre line = success path. Red = errors to the side.
     %% Return nodes name the form to reopen; no long crossing arrows.
 
-    start(["START<br/>Open application"])
+    start(["START<br/>Open registration page"])
 
-    subgraph entry["1. Application entry"]
+    subgraph form["1. Registration form"]
         direction TB
-        open_app["Open application"]
-        choose{"Register or log in?"}
+        fillForm["Fill registration form<br/>email · password"]
+        clientValid{"Browser validation<br/>passes?"}
+        clientError["Show required email<br/>or password message"]
+        returnClient(["RETURN TO REGISTER FORM<br/>Correct the highlighted fields"])
+
+        fillForm --> clientValid
+        clientValid -->|NO| clientError
+        clientError --> returnClient
     end
 
-    start --> open_app --> choose
+    start --> fillForm
 
-    subgraph credentials["2. Credentials"]
+    subgraph request["2. Backend checks"]
         direction TB
-        register_form["Fill registration form<br/>email · password"]
-        login_form["Fill login form<br/>email · password"]
-        validate{"Credentials valid?"}
+        sendRequest["POST /auth/register"]
+        backendValid{"Backend validation<br/>passes?"}
+        validationError["400 Validation failed"]
+        returnValidation(["RETURN TO REGISTER FORM<br/>Fix email or password rules"])
+        emailExists{"Email already<br/>registered?"}
+        duplicateError["409 Email already registered"]
+        returnDuplicate(["RETURN TO REGISTER FORM<br/>Use a different email"])
 
-        reg_error["Show registration field errors"]
-        login_error["Show invalid credentials error"]
-        return_register(["RETURN TO REGISTER FORM<br/>Correct the highlighted fields"])
-        return_login(["RETURN TO LOGIN FORM<br/>Try again with valid credentials"])
-
-        register_form --> validate
-        login_form --> validate
-        validate -->|NO · register| reg_error
-        validate -->|NO · login| login_error
-        reg_error --> return_register
-        login_error --> return_login
+        sendRequest --> backendValid
+        backendValid -->|NO| validationError
+        validationError --> returnValidation
+        backendValid -->|YES| emailExists
+        emailExists -->|YES| duplicateError
+        duplicateError --> returnDuplicate
     end
 
-    choose -->|REGISTER| register_form
-    choose -->|LOG IN| login_form
+    clientValid -->|YES| sendRequest
 
-    subgraph session["3. Authenticated session"]
+    subgraph issue["3. Persist user and issue JWT"]
         direction TB
-        create_session["Create authenticated session<br/>role USER · own data only"]
-        session_ok{"Session created?"}
-        session_error["Show session error"]
-        return_login_session(["RETURN TO LOGIN FORM<br/>Retry authentication"])
+        hashPassword["Hash password with BCrypt"]
+        saveUser["Save user in PostgreSQL"]
+        saveSuccessful{"User saved<br/>successfully?"}
+        serverError["500 Registration failed"]
+        returnServer(["RETURN TO REGISTER FORM<br/>Retry registration"])
+        createToken["Create signed JWT"]
+        returnToken["201 Created with JWT"]
+        storeToken["Store JWT in browser"]
+        openHome["Open home page<br/>as authenticated user"]
+        endOk(["END<br/>Authenticated access granted"])
 
-        create_session --> session_ok
-        session_ok -->|NO| session_error
-        session_error --> return_login_session
+        hashPassword --> saveUser --> saveSuccessful
+        saveSuccessful -->|NO| serverError
+        serverError --> returnServer
+        saveSuccessful -->|YES| createToken
+        createToken --> returnToken --> storeToken --> openHome --> endOk
     end
 
-    validate -->|YES| create_session
+    emailExists -->|NO| hashPassword
 
-    subgraph access["4. Application access"]
-        direction TB
-        open_dashboard["Open dashboard"]
-        end_ok(["END<br/>Authenticated access granted"])
-
-        open_dashboard --> end_ok
-    end
-
-    session_ok -->|YES| open_dashboard
-
-    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or session errors.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or persistence errors.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
 
     classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
-    classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
-    classDef entryAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
     classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
-    classDef sessionAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef requestAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
+    classDef issueAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
     classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
     classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
     classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
@@ -173,23 +194,145 @@ flowchart TB
     classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
 
     class start startNode
-    class open_app entryAction
-    class register_form,login_form formAction
-    class create_session,open_dashboard sessionAction
-    class choose,validate,session_ok decision
-    class reg_error,login_error,session_error error
-    class return_register,return_login,return_login_session restart
-    class end_ok endNode
+    class fillForm formAction
+    class sendRequest requestAction
+    class hashPassword,saveUser,createToken,returnToken,storeToken,openHome issueAction
+    class clientValid,backendValid,emailExists,saveSuccessful decision
+    class clientError,validationError,duplicateError,serverError error
+    class returnClient,returnValidation,returnDuplicate,returnServer restart
+    class endOk endNode
     class legend legendBox
 
-    style entry fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
-    style credentials fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
-    style session fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
-    style access fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
+    style form fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
+    style request fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
+    style issue fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
 ```
 
+#### Login flow
 
+Source file: [diagrams/login-flow.mmd](diagrams/login-flow.mmd)
 
+```mermaid
+flowchart TB
+    %% Flow A — Login
+    %% Public POST /auth/login; success returns JWT (no server session).
+    %% Missing user and wrong password share the same 401 message.
+    %% Layout: green centre line = success path. Red = errors to the side.
+    %% Return nodes name the form to reopen; no long crossing arrows.
+
+    start(["START<br/>Open login page"])
+
+    subgraph form["1. Login form"]
+        direction TB
+        fillForm["Fill login form<br/>email · password"]
+        clientValid{"Browser validation<br/>passes?"}
+        clientError["Show required email<br/>or password message"]
+        returnClient(["RETURN TO LOGIN FORM<br/>Correct the highlighted fields"])
+
+        fillForm --> clientValid
+        clientValid -->|NO| clientError
+        clientError --> returnClient
+    end
+
+    start --> fillForm
+
+    subgraph request["2. Backend checks"]
+        direction TB
+        sendRequest["POST /auth/login"]
+        backendValid{"Backend validation<br/>passes?"}
+        validationError["400 Validation failed"]
+        returnValidation(["RETURN TO LOGIN FORM<br/>Fix email or password format"])
+        findUser["Find user by normalized email"]
+        credentialsValid{"User exists and<br/>password matches?"}
+        loginError["401 Invalid email or password"]
+        returnLogin(["RETURN TO LOGIN FORM<br/>Try again with valid credentials"])
+
+        sendRequest --> backendValid
+        backendValid -->|NO| validationError
+        validationError --> returnValidation
+        backendValid -->|YES| findUser
+        findUser --> credentialsValid
+        credentialsValid -->|NO| loginError
+        loginError --> returnLogin
+    end
+
+    clientValid -->|YES| sendRequest
+
+    subgraph issue["3. Issue JWT"]
+        direction TB
+        createToken["Create signed JWT"]
+        returnToken["200 OK with JWT"]
+        storeToken["Store JWT in browser"]
+        openHome["Open home page<br/>as authenticated user"]
+        endOk(["END<br/>Authenticated access granted"])
+
+        createToken --> returnToken --> storeToken --> openHome --> endOk
+    end
+
+    credentialsValid -->|YES| createToken
+
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or credential errors.<br/>Missing user and wrong password share one 401 message.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
+
+    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
+    classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
+    classDef requestAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
+    classDef issueAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
+    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
+
+    class start startNode
+    class fillForm formAction
+    class sendRequest,findUser requestAction
+    class createToken,returnToken,storeToken,openHome issueAction
+    class clientValid,backendValid,credentialsValid decision
+    class clientError,validationError,loginError error
+    class returnClient,returnValidation,returnLogin restart
+    class endOk endNode
+    class legend legendBox
+
+    style form fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
+    style request fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
+    style issue fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
+```
+
+Missing user and wrong password both return the same `401` message (`Invalid email or password`) so login does not reveal whether an email is registered.
+
+#### Protected request with JWT
+
+Source file: [diagrams/jwt-protected-request.mmd](diagrams/jwt-protected-request.mmd)
+
+When a protected endpoint is called (for example `GET /auth/me`), the JWT is validated before the controller runs. If the token is missing or invalid, the filter does not establish an authenticated principal; Spring Security then rejects the request with `401`.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant JwtFilter as JwtAuthFilter
+    participant JwtService
+    participant SecurityContext
+    participant SecurityRules as SecurityConfig
+    participant Controller
+    participant CurrentUser
+
+    Browser->>JwtFilter: Request with Bearer JWT
+    JwtFilter->>JwtService: Validate token
+    alt Token is valid
+        JwtService-->>JwtFilter: User ID and email
+        JwtFilter->>SecurityContext: Store UserPrincipal
+        JwtFilter->>SecurityRules: Continue request
+        SecurityRules->>Controller: Authenticated request allowed
+        Controller->>CurrentUser: Get authenticated user
+        CurrentUser->>SecurityContext: Read UserPrincipal
+        SecurityContext-->>CurrentUser: User ID and email
+        CurrentUser-->>Controller: Current user
+        Controller-->>Browser: Protected response
+    else Token missing or invalid
+        JwtFilter->>SecurityRules: Continue without authentication
+        SecurityRules-->>Browser: 401 Unauthorized
+    end
+```
 
 
 ### Flow B — Document processing
@@ -936,7 +1079,6 @@ These questions remain open until the relevant implementation phase:
 - Which OCR engine or service is used.
 - Which AI extraction approach is used.
 - Whether raw OCR text is retained long-term and for how long.
-- File storage location: local volume, object storage, or cloud service.
 - Retry limits and timeout behaviour.
 - Exact seeded category `name` / `slug` pairs (a provisional seed exists in `db/migrations/002_seed_categories.sql` and may be refined).
 - Whether an empty `document_extractions` row is created on manual-continue-after-failure, or review treats a missing extraction as an empty form.
@@ -953,10 +1095,11 @@ Resolved for MVP database design:
 
 Resolved for MVP technology stack:
 - Backend: Java 21+ + Spring Boot 3 (REST JSON API).
-- API authentication: JWT bearer (Spring Security).
+- API authentication: JWT bearer (Spring Security); BCrypt password hashes; public `/auth/register` and `/auth/login`; protected resources use `Authorization: Bearer` and ownership from the authenticated user id.
 - Validation at API boundaries: Jakarta Bean Validation on DTOs.
 - Persistence: Spring Data JPA (Hibernate), with schema controlled by SQL migrations in `db/migrations/` (Hibernate should not generate DDL).
-- Frontend: Vite + plain JavaScript (hash routing + `fetch`).
+- Frontend: Vite + plain JavaScript (hash routing + `fetch`); JWT stored in the browser for subsequent API calls.
+- File storage for MVP uploads: local Docker volume (`UPLOAD_DIR`).
 
 ---
 
@@ -980,6 +1123,7 @@ The following principles are accepted for the project:
 
 | Date       | Change                                                                                                                             |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-27 | Replaced Flow A with separate register/login diagrams (START + phased subgraphs, no backward error arrows), documented JWT authentication contract and protected-request sequence; updated stack notes and README for implemented auth. |
 | 2026-07-17 | Defined MVP relational model (users, documents, document_extractions, categories, expenses), ER diagram, and application DB rules. |
 | 2026-07-16 | Added Flow A authentication and Flow C expense exploration activity diagrams.                                                      |
 | 2026-07-14 | Created the initial architecture draft and defined Flow B for document processing.                                                 |

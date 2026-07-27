@@ -1,0 +1,89 @@
+flowchart TB
+    %% Flow A — Register
+    %% Public POST /auth/register; success returns JWT (no server session).
+    %% Layout: green centre line = success path. Red = errors to the side.
+    %% Return nodes name the form to reopen; no long crossing arrows.
+
+    start(["START<br/>Open registration page"])
+
+    subgraph form["1. Registration form"]
+        direction TB
+        fillForm["Fill registration form<br/>email · password"]
+        clientValid{"Browser validation<br/>passes?"}
+        clientError["Show required email<br/>or password message"]
+        returnClient(["RETURN TO REGISTER FORM<br/>Correct the highlighted fields"])
+
+        fillForm --> clientValid
+        clientValid -->|NO| clientError
+        clientError --> returnClient
+    end
+
+    start --> fillForm
+
+    subgraph request["2. Backend checks"]
+        direction TB
+        sendRequest["POST /auth/register"]
+        backendValid{"Backend validation<br/>passes?"}
+        validationError["400 Validation failed"]
+        returnValidation(["RETURN TO REGISTER FORM<br/>Fix email or password rules"])
+        emailExists{"Email already<br/>registered?"}
+        duplicateError["409 Email already registered"]
+        returnDuplicate(["RETURN TO REGISTER FORM<br/>Use a different email"])
+
+        sendRequest --> backendValid
+        backendValid -->|NO| validationError
+        validationError --> returnValidation
+        backendValid -->|YES| emailExists
+        emailExists -->|YES| duplicateError
+        duplicateError --> returnDuplicate
+    end
+
+    clientValid -->|YES| sendRequest
+
+    subgraph issue["3. Persist user and issue JWT"]
+        direction TB
+        hashPassword["Hash password with BCrypt"]
+        saveUser["Save user in PostgreSQL"]
+        saveSuccessful{"User saved<br/>successfully?"}
+        serverError["500 Registration failed"]
+        returnServer(["RETURN TO REGISTER FORM<br/>Retry registration"])
+        createToken["Create signed JWT"]
+        returnToken["201 Created with JWT"]
+        storeToken["Store JWT in browser"]
+        openHome["Open home page<br/>as authenticated user"]
+        endOk(["END<br/>Authenticated access granted"])
+
+        hashPassword --> saveUser --> saveSuccessful
+        saveSuccessful -->|NO| serverError
+        serverError --> returnServer
+        saveSuccessful -->|YES| createToken
+        createToken --> returnToken --> storeToken --> openHome --> endOk
+    end
+
+    emailExists -->|NO| hashPassword
+
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or persistence errors.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
+
+    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
+    classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
+    classDef requestAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
+    classDef issueAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
+    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
+
+    class start startNode
+    class fillForm formAction
+    class sendRequest requestAction
+    class hashPassword,saveUser,createToken,returnToken,storeToken,openHome issueAction
+    class clientValid,backendValid,emailExists,saveSuccessful decision
+    class clientError,validationError,duplicateError,serverError error
+    class returnClient,returnValidation,returnDuplicate,returnServer restart
+    class endOk endNode
+    class legend legendBox
+
+    style form fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
+    style request fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
+    style issue fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534

@@ -1,0 +1,83 @@
+flowchart TB
+    %% Flow A — Login
+    %% Public POST /auth/login; success returns JWT (no server session).
+    %% Missing user and wrong password share the same 401 message.
+    %% Layout: green centre line = success path. Red = errors to the side.
+    %% Return nodes name the form to reopen; no long crossing arrows.
+
+    start(["START<br/>Open login page"])
+
+    subgraph form["1. Login form"]
+        direction TB
+        fillForm["Fill login form<br/>email · password"]
+        clientValid{"Browser validation<br/>passes?"}
+        clientError["Show required email<br/>or password message"]
+        returnClient(["RETURN TO LOGIN FORM<br/>Correct the highlighted fields"])
+
+        fillForm --> clientValid
+        clientValid -->|NO| clientError
+        clientError --> returnClient
+    end
+
+    start --> fillForm
+
+    subgraph request["2. Backend checks"]
+        direction TB
+        sendRequest["POST /auth/login"]
+        backendValid{"Backend validation<br/>passes?"}
+        validationError["400 Validation failed"]
+        returnValidation(["RETURN TO LOGIN FORM<br/>Fix email or password format"])
+        findUser["Find user by normalized email"]
+        credentialsValid{"User exists and<br/>password matches?"}
+        loginError["401 Invalid email or password"]
+        returnLogin(["RETURN TO LOGIN FORM<br/>Try again with valid credentials"])
+
+        sendRequest --> backendValid
+        backendValid -->|NO| validationError
+        validationError --> returnValidation
+        backendValid -->|YES| findUser
+        findUser --> credentialsValid
+        credentialsValid -->|NO| loginError
+        loginError --> returnLogin
+    end
+
+    clientValid -->|YES| sendRequest
+
+    subgraph issue["3. Issue JWT"]
+        direction TB
+        createToken["Create signed JWT"]
+        returnToken["200 OK with JWT"]
+        storeToken["Store JWT in browser"]
+        openHome["Open home page<br/>as authenticated user"]
+        endOk(["END<br/>Authenticated access granted"])
+
+        createToken --> returnToken --> storeToken --> openHome --> endOk
+    end
+
+    credentialsValid -->|YES| createToken
+
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or credential errors.<br/>Missing user and wrong password share one 401 message.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
+
+    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
+    classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
+    classDef requestAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
+    classDef issueAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
+    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
+    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
+
+    class start startNode
+    class fillForm formAction
+    class sendRequest,findUser requestAction
+    class createToken,returnToken,storeToken,openHome issueAction
+    class clientValid,backendValid,credentialsValid decision
+    class clientError,validationError,loginError error
+    class returnClient,returnValidation,returnLogin restart
+    class endOk endNode
+    class legend legendBox
+
+    style form fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
+    style request fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
+    style issue fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
