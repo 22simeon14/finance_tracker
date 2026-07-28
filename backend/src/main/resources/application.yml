@@ -13,6 +13,11 @@ spring:
       ddl-auto: none
     # Avoid lazy DB access outside a transaction after the request controller returns.
     open-in-view: false
+  servlet:
+    multipart:
+      # Keep upload requests aligned with the Step 9 limit.
+      max-file-size: 5MB
+      max-request-size: 5MB
 
 server:
   port: 8080
@@ -22,3 +27,6 @@ app:
     secret: ${JWT_SECRET}
     # 86400000 ms = 24 hours token lifetime.
     expiration-ms: 86400000
+  upload:
+    # Base folder for local document uploads. Docker/.env provides the real path.
+    dir: ${UPLOAD_DIR}
