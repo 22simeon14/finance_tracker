@@ -8,6 +8,7 @@ import { startRouter } from './router.js';
 import { renderHomePage } from './pages/home.js';
 import { renderLoginPage } from './pages/login.js';
 import { renderRegisterPage } from './pages/register.js';
+import { renderUploadPage } from './pages/upload.js';
 
 const app = document.getElementById('app');
 
@@ -18,6 +19,10 @@ startRouter((route) => {
   }
   if (route === '/register') {
     renderRegisterPage(app);
+    return;
+  }
+  if (route === '/upload') {
+    renderUploadPage(app);
     return;
   }
   renderHomePage(app);
