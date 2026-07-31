@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-07-17  
+> **Last updated:** 2026-07-31  
 > This document evolves together with the implementation. It records decisions that are currently accepted and separates them from open questions.
 
 ## 1. Product vision
@@ -340,6 +340,19 @@ sequenceDiagram
 
 The user uploads a document, the system processes it, the user reviews the proposed fields, and an expense is saved only after explicit approval.
 
+#### Upload contract (implemented)
+
+Step 9 covers upload and metadata only. OCR, review, and expenses remain later steps; a successful upload leaves the document at `UPLOADED` and does not create `document_extractions` or `expenses` rows.
+
+- `POST /documents` — protected multipart (`file` part); success `201` with document metadata.
+- `GET /documents/{id}` — protected; metadata only for the owner; missing or foreign id → `404` (same response so existence is not leaked); no file bytes.
+- Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`.
+- Maximum file size: 5 MB (`5242880` bytes). Enforced in the app and by Spring multipart limits (`spring.servlet.multipart.max-file-size` / `max-request-size`).
+- Storage path pattern: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` — the client filename is never used for the path on disk.
+- `documents.storage_path` stays server-side; API responses expose `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt` only.
+- Owner comes from the JWT (`CurrentUser`), never from a body field.
+- Order: validate → write file → insert DB; if the DB insert fails after a disk write, delete the orphan file.
+
 ### Flow C — Expense exploration
 
 The user opens the expense list, filters expenses, views details, edits existing records, and sees aggregated information in the dashboard.
@@ -489,7 +502,7 @@ Convert a user-provided receipt or invoice into a valid, user-approved expense w
 
 - The user is authenticated.
 - The user is allowed to upload a document.
-- The selected file uses a supported format and is within the configured size limit.
+- The selected file uses a supported MIME type (`image/jpeg`, `image/png`, or `application/pdf`) and is at most 5 MB.
 
 
 
@@ -1074,7 +1087,6 @@ Flow B is complete when a user can:
 
 These questions remain open until the relevant implementation phase:
 
-- Exact supported file types and maximum file size.
 - Whether PDF support includes only digital PDFs or also scanned PDFs.
 - Whether processing is synchronous or performed by a background job.
 - Which OCR engine or service is used.
@@ -1084,6 +1096,14 @@ These questions remain open until the relevant implementation phase:
 - Exact seeded category `name` / `slug` pairs (a provisional seed exists in `db/migrations/002_seed_categories.sql` and may be refined).
 - Whether an empty `document_extractions` row is created on manual-continue-after-failure, or review treats a missing extraction as an empty form.
 - Whether field-level confidence scores are introduced after the MVP.
+
+Resolved for MVP upload limits (Step 9):
+
+- Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`.
+- Maximum upload size: 5 MB (`5242880` bytes), also configured as Spring multipart max file/request size.
+- On-disk layout: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` (extension derived from allowed MIME; client filename is not trusted for the path).
+- Create status: `UPLOADED` only; no automatic advance to `PROCESSING` until the processing step is implemented.
+- `GET /documents/{id}` returns owner-scoped metadata only (no file streaming, no extraction payload).
 
 Resolved for MVP database design:
 
@@ -1124,6 +1144,7 @@ The following principles are accepted for the project:
 
 | Date       | Change                                                                                                                             |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-31 | Resolved upload MIME/size limits and storage path rules; documented `POST /documents` and `GET /documents/{id}` upload contract (status `UPLOADED` only; no extraction/expense on create). |
 | 2026-07-27 | Replaced Flow A with separate register/login diagrams (START + phased subgraphs, no backward error arrows), documented JWT authentication contract and protected-request sequence; updated stack notes and README for implemented auth. |
 | 2026-07-17 | Defined MVP relational model (users, documents, document_extractions, categories, expenses), ER diagram, and application DB rules. |
 | 2026-07-16 | Added Flow A authentication and Flow C expense exploration activity diagrams.                                                      |
