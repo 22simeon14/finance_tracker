@@ -67,6 +67,7 @@ public class DocumentService {
 
             savedDocument = documentRepository.save(document);
         } catch (RuntimeException exception) {
+            // Only safe place to delete the file: no documents row was persisted yet.
             try {
                 fileStorageService.deleteStoredFile(storagePath);
             } catch (RuntimeException cleanupException) {
@@ -76,8 +77,13 @@ public class DocumentService {
             throw exception;
         }
 
-        // File + UPLOADED row exist; prefer PROCESSING_FAILED over an orphaned disk file if mock work fails.
-        runMockProcessing(savedDocument);
+        // File + UPLOADED row exist. Never delete the file from here — prefer a recoverable
+        // PROCESSING_FAILED document (and always return its id) over a silent disk orphan.
+        try {
+            runMockProcessing(savedDocument);
+        } catch (RuntimeException processingException) {
+            savedDocument = recoverAfterProcessingFailure(savedDocument, processingException);
+        }
         return toReviewResponse(savedDocument);
     }
 
@@ -96,7 +102,11 @@ public class DocumentService {
             );
         }
 
-        runMockProcessing(document);
+        try {
+            runMockProcessing(document);
+        } catch (RuntimeException processingException) {
+            document = recoverAfterProcessingFailure(document, processingException);
+        }
         return toReviewResponse(document);
     }
 
@@ -141,12 +151,13 @@ public class DocumentService {
     /**
      * Set PROCESSING, then either fail (filename contains "fail") or upsert mock extraction
      * and set REVIEW_REQUIRED. Unexpected errors mark PROCESSING_FAILED so the row stays recoverable.
+     * The PROCESSING status save is inside the try so a DB failure there is also recoverable.
      */
     private void runMockProcessing(Document document) {
-        document.setStatus(STATUS_PROCESSING);
-        documentRepository.save(document);
-
         try {
+            document.setStatus(STATUS_PROCESSING);
+            documentRepository.save(document);
+
             if (shouldSimulateFailure(document.getOriginalFilename())) {
                 clearExtractionIfPresent(document.getId());
                 document.setStatus(STATUS_PROCESSING_FAILED);
@@ -169,13 +180,32 @@ public class DocumentService {
         } catch (RuntimeException exception) {
             // Prefer a recoverable PROCESSING_FAILED row over failing the whole upload/retry.
             try {
-                document.setStatus(STATUS_PROCESSING_FAILED);
-                documentRepository.save(document);
+                markProcessingFailed(document);
             } catch (RuntimeException saveFailed) {
                 exception.addSuppressed(saveFailed);
                 throw exception;
             }
         }
+    }
+
+    /**
+     * Last resort after UPLOADED already exists: persist PROCESSING_FAILED if possible,
+     * otherwise reload the durable row so the client still receives a truthful document id/status.
+     * Does not delete the stored file (row would point at a missing path).
+     */
+    private Document recoverAfterProcessingFailure(Document document, RuntimeException processingException) {
+        try {
+            markProcessingFailed(document);
+            return document;
+        } catch (RuntimeException saveFailed) {
+            processingException.addSuppressed(saveFailed);
+            return documentRepository.findById(document.getId()).orElse(document);
+        }
+    }
+
+    private void markProcessingFailed(Document document) {
+        document.setStatus(STATUS_PROCESSING_FAILED);
+        documentRepository.save(document);
     }
 
     /** Filename marker for local testing of the failed-processing path (case-insensitive). */
