@@ -12,10 +12,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * Main Responsibility: Expose authenticated upload and document-metadata endpoints.
+ * Main Responsibility: Expose authenticated upload, processing, and document-metadata endpoints.
  *
  * The current user always comes from JWT auth, never from request input, so each request
- * is safely scoped to its owner.
+ * is safely scoped to its owner. Processing rules live in DocumentService.
  */
 @RestController
 @RequestMapping("/documents")
@@ -29,11 +29,25 @@ public class DocumentController {
         this.currentUser = currentUser;
     }
 
-    /** Accept a multipart file upload and return the created document metadata. */
+    /**
+     * Accept a multipart upload, run sync mock processing, and return post-processing review data.
+     */
     @PostMapping
-    public ResponseEntity<DocumentResponse> upload(@RequestPart("file") MultipartFile file) {
-        DocumentResponse response = documentService.uploadDocument(currentUser.getUserId(), file);
+    public ResponseEntity<DocumentReviewResponse> upload(@RequestPart("file") MultipartFile file) {
+        DocumentReviewResponse response = documentService.uploadDocument(currentUser.getUserId(), file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /** Re-run mock processing from UPLOADED or PROCESSING_FAILED. */
+    @PostMapping("/{id}/process")
+    public DocumentReviewResponse process(@PathVariable Long id) {
+        return documentService.process(currentUser.getUserId(), id);
+    }
+
+    /** Move a failed document to an empty review form (REVIEW_REQUIRED). */
+    @PostMapping("/{id}/continue-manual")
+    public DocumentReviewResponse continueManual(@PathVariable Long id) {
+        return documentService.continueManual(currentUser.getUserId(), id);
     }
 
     /** Return metadata only; missing or foreign ids both resolve as 404. */
