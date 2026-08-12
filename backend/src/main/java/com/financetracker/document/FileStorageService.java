@@ -14,10 +14,11 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Main Responsibility: Store uploaded document files under the configured UPLOAD_DIR.
+ * Main Responsibility: Store, read, and delete document files under the configured UPLOAD_DIR.
  *
  * Keeps file paths server-controlled by using the current user id and a generated UUID name.
  * Returns only a relative storage path so the database never depends on a machine-specific absolute path.
+ * All path operations reject escape attempts outside the upload root.
  */
 @Service
 public class FileStorageService {
@@ -62,16 +63,35 @@ public class FileStorageService {
     }
 
     /**
-     * Delete a previously stored file when a later step fails.
+     * Resolve a stored file for streaming. Rejects path escape and missing files.
+     */
+    public Path readStoredFile(String relativePath) {
+        Path targetFile = resolveUnderRoot(relativePath);
+
+        if (!Files.isRegularFile(targetFile)) {
+            throw new IllegalStateException("Stored file not found.");
+        }
+
+        return targetFile;
+    }
+
+    /**
+     * Delete a previously stored file (upload rollback or pending document delete).
      */
     public void deleteStoredFile(String relativePath) {
+        Path targetFile = resolveUnderRoot(relativePath);
+        deleteIfExists(targetFile);
+    }
+
+    /** Normalize relativePath and ensure it stays under UPLOAD_DIR. */
+    private Path resolveUnderRoot(String relativePath) {
         Path targetFile = uploadRoot.resolve(relativePath).normalize();
 
         if (!targetFile.startsWith(uploadRoot)) {
             throw new IllegalStateException("Stored file path escaped configured root.");
         }
 
-        deleteIfExists(targetFile);
+        return targetFile;
     }
 
     private String resolveExtension(String mimeType) {

@@ -5,15 +5,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Set;
 
 /**
- * Main Responsibility: Validate uploads, run mock processing, and load owner-scoped documents.
+ * Main Responsibility: Validate uploads, run mock processing, and serve owner-scoped documents.
  *
  * Owns file rules, storage write order, status transitions (UPLOADED → PROCESSING →
- * REVIEW_REQUIRED / PROCESSING_FAILED), and cleanup when the DB save fails after the file
- * is already on disk. Keeps the controller thin.
+ * REVIEW_REQUIRED / PROCESSING_FAILED), review GET / file stream / pending DELETE,
+ * and cleanup when the DB save fails after the file is already on disk. Keeps the controller thin.
  */
 @Service
 public class DocumentService {
@@ -28,6 +29,7 @@ public class DocumentService {
     private static final String STATUS_PROCESSING = "PROCESSING";
     private static final String STATUS_REVIEW_REQUIRED = "REVIEW_REQUIRED";
     private static final String STATUS_PROCESSING_FAILED = "PROCESSING_FAILED";
+    private static final String STATUS_SAVED = "SAVED";
 
     private final DocumentRepository documentRepository;
     private final DocumentExtractionRepository documentExtractionRepository;
@@ -141,11 +143,50 @@ public class DocumentService {
     }
 
     /**
-     * Use id + userId so foreign document ids behave like missing records.
+     * Owner-scoped review payload (metadata + fileUrl + nullable extraction).
+     * Foreign or missing id → 404. Does not expose storagePath.
      */
-    public DocumentResponse getDocument(Long userId, Long documentId) {
+    public DocumentReviewResponse getDocument(Long userId, Long documentId) {
         Document document = findOwnedDocument(userId, documentId);
-        return toResponse(document);
+        return toReviewResponse(document);
+    }
+
+    /**
+     * Resolve the stored file for an owned document so the controller can stream bytes.
+     * Missing row, foreign owner, or missing disk file → 404.
+     */
+    public DocumentFile getDocumentFile(Long userId, Long documentId) {
+        Document document = findOwnedDocument(userId, documentId);
+
+        Path filePath;
+        try {
+            filePath = fileStorageService.readStoredFile(document.getStoragePath());
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Document file not found", exception);
+        }
+
+        return new DocumentFile(filePath, document.getMimeType(), document.getOriginalFilename());
+    }
+
+    /**
+     * Hard-delete a pending document (DB row cascades extraction) then remove the disk file.
+     * SAVED is blocked (409) because expenses use ON DELETE RESTRICT on documents.
+     * Foreign or missing → 404.
+     */
+    public void deleteDocument(Long userId, Long documentId) {
+        Document document = findOwnedDocument(userId, documentId);
+
+        if (STATUS_SAVED.equals(document.getStatus())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Saved documents cannot be deleted"
+            );
+        }
+
+        String storagePath = document.getStoragePath();
+        // Delete the DB row first so a failed disk cleanup cannot leave a usable orphan document.
+        documentRepository.delete(document);
+        fileStorageService.deleteStoredFile(storagePath);
     }
 
     /**
@@ -254,17 +295,6 @@ public class DocumentService {
         return originalFilename.trim();
     }
 
-    private DocumentResponse toResponse(Document document) {
-        return new DocumentResponse(
-                document.getId(),
-                document.getStatus(),
-                document.getOriginalFilename(),
-                document.getMimeType(),
-                document.getFileSizeBytes(),
-                document.getCreatedAt()
-        );
-    }
-
     private DocumentReviewResponse toReviewResponse(Document document) {
         ExtractionResponse extraction = documentExtractionRepository
                 .findByDocumentId(document.getId())
@@ -292,5 +322,12 @@ public class DocumentService {
                 extraction.getProposedCurrency(),
                 extraction.getProposedCategoryId()
         );
+    }
+
+    /**
+     * Internal payload for streaming: absolute path plus response headers (MIME + filename).
+     * Not a public API DTO — never includes storagePath as a client-facing field.
+     */
+    public record DocumentFile(Path path, String mimeType, String originalFilename) {
     }
 }
