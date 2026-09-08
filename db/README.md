@@ -44,6 +44,6 @@ KEEP_CONTAINER=1 bash db/verify_migrations.sh
 docker exec -it finance_tracker_verify_pg psql -U postgres -d finance_tracker_verify
 ```
 
-The SQL migrations are the schema source of truth. Spring Data JPA entities are added in later application steps; Hibernate must not generate DDL (`ddl-auto=none`).
+The SQL migrations are the schema source of truth. Spring Data JPA entities map to these tables for reads/writes; Hibernate must not generate or alter DDL (`ddl-auto=none`).
 
-See `docs/architecture.md` section 6.9 for table responsibilities, invariants, and application business rules.
+See `docs/architecture.md` section 8 (Data model) for table responsibilities, invariants, and application business rules.

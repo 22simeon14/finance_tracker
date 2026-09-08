@@ -2,15 +2,29 @@
 
 > **Status:** Working draft  
 > **Last updated:** 2026-09-08  
-> This document evolves together with the implementation. It records decisions that are currently accepted and separates them from open questions.
+> This document records accepted decisions and how the system is built. Detail diagrams live under [`diagrams/`](diagrams/).
+
+## Contents
+
+1. [Product vision](#1-product-vision)
+2. [Problem and users](#2-problem-and-users)
+3. [MVP scope](#3-mvp-scope)
+4. [System shape](#4-system-shape) — stack, deployment, packages, frontend, API
+5. [Flow A — Authentication](#5-flow-a--authentication)
+6. [Flow B — Document processing](#6-flow-b--document-processing)
+7. [Flow C — Expense exploration](#7-flow-c--expense-exploration)
+8. [Data model](#8-data-model)
+9. [Open decisions](#9-open-decisions)
+10. [Principles](#10-principles)
+11. [Change log](#11-change-log)
+
+---
 
 ## 1. Product vision
 
-AI Finance Tracker is a web application for personal expense tracking. A user uploads a receipt or invoice, the system extracts the main financial information, the user reviews and corrects it, and the confirmed expense is stored and included in lists, filters, and dashboard statistics.
+AI Finance Tracker is a web app for personal expense tracking. A user uploads a receipt or invoice, the system proposes the main financial fields, the user reviews and corrects them, and the confirmed expense is stored for lists, filters, and a dashboard.
 
 The product reduces manual data entry while keeping the user in control of the final saved data.
-
-### Core value flow
 
 ```mermaid
 flowchart LR
@@ -20,39 +34,25 @@ flowchart LR
     D --> E[View, filter and analyse expenses]
 ```
 
+---
 
+## 2. Problem and users
 
-
-
-## 2. Problem being solved
-
-Financial information from receipts and invoices is usually unstructured, scattered across paper documents, images, PDFs, and email attachments. Manual entry is slow and discourages consistent expense tracking.
-
-The system transforms an unstructured document into a verified structured expense:
+Receipts and invoices are unstructured (paper, photos, PDFs). Manual entry is slow. The MVP turns a document into a verified structured expense:
 
 ```text
-Document → OCR text → proposed structured fields → user verification → saved expense
+Document → OCR text → proposed fields → user verification → saved expense
 ```
 
-The system is not intended to be accounting software. In the MVP, receipts and invoices are treated as evidence for personal expenses, not as complete accounting objects.
+It is not accounting software. Receipts are evidence for personal expenses, not full accounting objects.
 
-## 3. Target users
+**Primary MVP user:** an individual who wants to track personal spending (students, young professionals, people who already photograph receipts).
 
+**Later possibility:** freelancers organising business expenses. Tax, VAT, teams, and multi-role workflows are outside the MVP.
 
+---
 
-### Primary MVP user
-
-An individual who wants to track personal expenses without manually entering every record.
-
-Examples include students, young professionals, and users who already keep or photograph receipts.
-
-### Possible later user
-
-A freelancer or self-employed person who wants to organise business-related expense documents. Tax, VAT, approval, and accounting workflows are outside the MVP.
-
-## 4. MVP scope
-
-
+## 3. MVP scope
 
 ### Included
 
@@ -70,8 +70,6 @@ A freelancer or self-employed person who wants to organise business-related expe
 - A basic dashboard with aggregated expense information.
 - Basic automated tests and Docker-based local setup.
 
-
-
 ### Explicitly excluded
 
 - Administrator profile and admin panel.
@@ -85,234 +83,190 @@ A freelancer or self-employed person who wants to organise business-related expe
 - Natural-language querying in the first release.
 - Guaranteed perfect recognition of every document format.
 
+---
 
+## 4. System shape
 
-## 5. Core user journeys
+### 4.1 Technology stack
 
+| Layer | Choice |
+| ----- | ------ |
+| Backend | Java 21+, Spring Boot 3, REST JSON |
+| Auth | JWT bearer (Spring Security), BCrypt password hashes |
+| Validation | Jakarta Bean Validation on request DTOs |
+| Persistence | Spring Data JPA; schema owned by SQL in `db/migrations/` (`ddl-auto=none`) |
+| Database | PostgreSQL 16 |
+| Frontend | Vite + plain JavaScript (hash routing + `fetch`) |
+| Files | Local disk under `UPLOAD_DIR` (Docker volume in Compose) |
+| Local run | Docker Compose for Postgres + backend; frontend on the host |
 
+### 4.2 Deployment (local)
 
-### Flow A — Authentication
+```mermaid
+flowchart LR
+    Browser["Browser<br/>localhost:5173"]
+    Vite["Vite dev server<br/>proxy /auth /documents …"]
+    API["Spring Boot<br/>localhost:8080"]
+    PG["PostgreSQL<br/>localhost:5432"]
+    Disk["Upload volume<br/>UPLOAD_DIR"]
 
-The user registers or logs in with email and password, receives a JWT, and thereafter accesses only their own documents and expenses. There is no server-side session table: identity for later requests comes from a signed bearer token.
+    Browser --> Vite
+    Vite -->|"same-origin proxy"| API
+    Browser -.->|"optional direct / CORS"| API
+    API --> PG
+    API --> Disk
+```
 
-MVP only: register / login / logout (client-side token clear). No admin, social login, 2FA, email confirmation, or forgotten-password paths.
+- **Compose** (`docker-compose.yml`): `postgres` + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created).
+- **Frontend** is not in Compose: `cd frontend && npm run dev`.
+- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL.
 
-#### Authentication contract
+How requests move:
 
-- `POST /auth/register` — public; success `201` with JWT.
-- `POST /auth/login` — public; success `200` with JWT.
-- `GET /auth/me` — protected; returns authenticated user `id` and `email`.
-- `GET /categories` — protected; returns active categories `id`, `name`, `slug`.
-- `GET /health` — public.
-- All other API endpoints require authentication by default.
-- Passwords are stored only as BCrypt hashes (`users.password_hash`); plaintext passwords never leave the register/login request.
-- JWT claims include user id (`sub`), email, issued-at, and expiration. JWT validity is 24 hours.
-- The frontend stores the JWT (local storage) and sends `Authorization: Bearer <token>` on protected requests.
-- Logout clears the token in the browser; the backend does not revoke tokens server-side in the MVP.
-- Resource ownership is derived from the authenticated user id in the JWT (via Spring Security context / `CurrentUser`), never from a client-supplied `userId` body field. There is no `users.role` column.
+1. The SPA calls paths like `/documents` (relative).
+2. Vite proxies them to the backend, so the browser avoids CORS during normal local use.
+3. `SecurityConfig` + `WebConfig` still allow `http://localhost:5173` if the API is called directly.
+4. Protected handlers read the user from the JWT via `CurrentUser` (never from a body `userId`).
 
-Overview source file: [diagrams/authentication-flow.mmd](diagrams/authentication-flow.mmd) (choose register or login). Detail diagrams below.
+### 4.3 Backend packages and responsibilities
 
-#### Register flow
-
-Source file: [diagrams/register-flow.mmd](diagrams/register-flow.mmd)
+Root package: `com.financetracker`.
 
 ```mermaid
 flowchart TB
-    %% Flow A — Register
-    %% Public POST /auth/register; success returns JWT (no server session).
-    %% Layout: green centre line = success path. Red = errors to the side.
-    %% Return nodes name the form to reopen; no long crossing arrows.
-
-    start(["START<br/>Open registration page"])
-
-    subgraph form["1. Registration form"]
-        direction TB
-        fillForm["Fill registration form<br/>email · password"]
-        clientValid{"Browser validation<br/>passes?"}
-        clientError["Show required email<br/>or password message"]
-        returnClient(["RETURN TO REGISTER FORM<br/>Correct the highlighted fields"])
-
-        fillForm --> clientValid
-        clientValid -->|NO| clientError
-        clientError --> returnClient
+    subgraph api ["HTTP boundary"]
+        AuthC[auth.AuthController]
+        DocC[document.DocumentController]
+        CatC[category.CategoryController]
+        HealthC[health.HealthController]
     end
 
-    start --> fillForm
-
-    subgraph request["2. Backend checks"]
-        direction TB
-        sendRequest["POST /auth/register"]
-        backendValid{"Backend validation<br/>passes?"}
-        validationError["400 Validation failed"]
-        returnValidation(["RETURN TO REGISTER FORM<br/>Fix email or password rules"])
-        emailExists{"Email already<br/>registered?"}
-        duplicateError["409 Email already registered"]
-        returnDuplicate(["RETURN TO REGISTER FORM<br/>Use a different email"])
-
-        sendRequest --> backendValid
-        backendValid -->|NO| validationError
-        validationError --> returnValidation
-        backendValid -->|YES| emailExists
-        emailExists -->|YES| duplicateError
-        duplicateError --> returnDuplicate
+    subgraph security ["Security"]
+        Filter[JwtAuthFilter]
+        Jwt[JwtService]
+        CU[CurrentUser]
     end
 
-    clientValid -->|YES| sendRequest
-
-    subgraph issue["3. Persist user and issue JWT"]
-        direction TB
-        hashPassword["Hash password with BCrypt"]
-        saveUser["Save user in PostgreSQL"]
-        saveSuccessful{"User saved<br/>successfully?"}
-        serverError["500 Registration failed"]
-        returnServer(["RETURN TO REGISTER FORM<br/>Retry registration"])
-        createToken["Create signed JWT"]
-        returnToken["201 Created with JWT"]
-        storeToken["Store JWT in browser"]
-        openHome["Open home page<br/>as authenticated user"]
-        endOk(["END<br/>Authenticated access granted"])
-
-        hashPassword --> saveUser --> saveSuccessful
-        saveSuccessful -->|NO| serverError
-        serverError --> returnServer
-        saveSuccessful -->|YES| createToken
-        createToken --> returnToken --> storeToken --> openHome --> endOk
+    subgraph services ["Application services"]
+        AuthS[AuthService]
+        DocS[DocumentService]
+        Mock[MockExtractionService]
+        Files[FileStorageService]
     end
 
-    emailExists -->|NO| hashPassword
+    subgraph data ["Persistence"]
+        UserR[UserRepository]
+        DocR[DocumentRepository]
+        ExtR[DocumentExtractionRepository]
+        CatR[CategoryRepository]
+        PG[(PostgreSQL)]
+    end
 
-    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or persistence errors.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
-
-    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
-    classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
-    classDef requestAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
-    classDef issueAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
-    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
-    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
-    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
-    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
-
-    class start startNode
-    class fillForm formAction
-    class sendRequest requestAction
-    class hashPassword,saveUser,createToken,returnToken,storeToken,openHome issueAction
-    class clientValid,backendValid,emailExists,saveSuccessful decision
-    class clientError,validationError,duplicateError,serverError error
-    class returnClient,returnValidation,returnDuplicate,returnServer restart
-    class endOk endNode
-    class legend legendBox
-
-    style form fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
-    style request fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
-    style issue fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
+    Filter --> Jwt
+    AuthC --> AuthS --> UserR
+    DocC --> CU
+    DocC --> DocS
+    DocS --> Mock
+    DocS --> Files
+    DocS --> DocR
+    DocS --> ExtR
+    CatC --> CatR
+    UserR --> PG
+    DocR --> PG
+    ExtR --> PG
+    CatR --> PG
+    Files --> Disk[(UPLOAD_DIR)]
 ```
 
-#### Login flow
+| Package | Main types | Responsibility |
+| ------- | ---------- | ---------------- |
+| `auth` | `AuthController`, `AuthService`, request/response DTOs | Register, login, `/me` |
+| `security` | `SecurityConfig`, `JwtAuthFilter`, `JwtService`, `CurrentUser`, `UserPrincipal` | Stateless JWT API; ownership identity |
+| `user` | `User`, `UserRepository` | Account row (`email`, `password_hash`) |
+| `document` | `DocumentController`, `DocumentService`, `FileStorageService`, `MockExtractionService`, entities/DTOs | Upload, mock process, review GET, file stream, pending delete |
+| `category` | `CategoryController`, entity/repo | List active categories |
+| `health` | `HealthController` | Liveness + DB check |
+| `config` | `WebConfig` | MVC CORS for the Vite origin |
 
-Source file: [diagrams/login-flow.mmd](diagrams/login-flow.mmd)
+There is no `expense` package yet. The `expenses` table exists in SQL for the approve step.
 
-```mermaid
-flowchart TB
-    %% Flow A — Login
-    %% Public POST /auth/login; success returns JWT (no server session).
-    %% Missing user and wrong password share the same 401 message.
-    %% Layout: green centre line = success path. Red = errors to the side.
-    %% Return nodes name the form to reopen; no long crossing arrows.
+**Typical collaboration (protected document call):** browser → `JwtAuthFilter` → controller → `CurrentUser` → `DocumentService` → repositories / `FileStorageService` → JSON or file bytes.
 
-    start(["START<br/>Open login page"])
+### 4.4 Frontend structure
 
-    subgraph form["1. Login form"]
-        direction TB
-        fillForm["Fill login form<br/>email · password"]
-        clientValid{"Browser validation<br/>passes?"}
-        clientError["Show required email<br/>or password message"]
-        returnClient(["RETURN TO LOGIN FORM<br/>Correct the highlighted fields"])
+| File / area | Role |
+| ----------- | ---- |
+| `main.js` | Entry; maps hash routes to page renderers |
+| `router.js` | Hash router (`#/…`) |
+| `api.js` | `api()` (JSON + Bearer); `apiBlob()` for file preview |
+| `auth.js` | JWT in `localStorage` (`ft_token`); login helpers |
+| `pages/home.js` | Account, categories sample, health |
+| `pages/login.js` / `register.js` | Auth forms |
+| `pages/upload.js` | Multipart upload → navigate to review |
+| `pages/review.js` | Preview + editable proposed fields; retry / continue-manual / delete |
+| `vite.config.js` | Dev server `:5173` + API proxy |
 
-        fillForm --> clientValid
-        clientValid -->|NO| clientError
-        clientError --> returnClient
-    end
+| Hash route | Page |
+| ---------- | ---- |
+| `#/` | Home |
+| `#/login` | Login |
+| `#/register` | Register |
+| `#/upload` | Upload (logged-in) |
+| `#/review/:id` | Review (logged-in) |
 
-    start --> fillForm
+Unknown hashes fall through to home.
 
-    subgraph request["2. Backend checks"]
-        direction TB
-        sendRequest["POST /auth/login"]
-        backendValid{"Backend validation<br/>passes?"}
-        validationError["400 Validation failed"]
-        returnValidation(["RETURN TO LOGIN FORM<br/>Fix email or password format"])
-        findUser["Find user by normalized email"]
-        credentialsValid{"User exists and<br/>password matches?"}
-        loginError["401 Invalid email or password"]
-        returnLogin(["RETURN TO LOGIN FORM<br/>Try again with valid credentials"])
+### 4.5 HTTP API overview
 
-        sendRequest --> backendValid
-        backendValid -->|NO| validationError
-        validationError --> returnValidation
-        backendValid -->|YES| findUser
-        findUser --> credentialsValid
-        credentialsValid -->|NO| loginError
-        loginError --> returnLogin
-    end
+| Method | Path | Auth | Success |
+| ------ | ---- | ---- | ------- |
+| `GET` | `/health` | Public | `200` status + DB |
+| `POST` | `/auth/register` | Public | `201` `{ token }` |
+| `POST` | `/auth/login` | Public | `200` `{ token }` |
+| `GET` | `/auth/me` | JWT | `{ id, email }` |
+| `GET` | `/categories` | JWT | Active categories `{ id, name, slug }` |
+| `POST` | `/documents` | JWT | `201` review DTO (after mock processing) |
+| `GET` | `/documents/{id}` | JWT | Review DTO |
+| `GET` | `/documents/{id}/file` | JWT | File bytes (inline) |
+| `POST` | `/documents/{id}/process` | JWT | Review DTO (retry mock) |
+| `POST` | `/documents/{id}/continue-manual` | JWT | Review DTO (empty extraction) |
+| `DELETE` | `/documents/{id}` | JWT | `204` (pending only; `SAVED` → `409`) |
 
-    clientValid -->|YES| sendRequest
+Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt`, `fileUrl`, nullable `extraction` (`rawOcrText`, proposed merchant/date/amount/currency/categoryId). Never exposes `storage_path`.
 
-    subgraph issue["3. Issue JWT"]
-        direction TB
-        createToken["Create signed JWT"]
-        returnToken["200 OK with JWT"]
-        storeToken["Store JWT in browser"]
-        openHome["Open home page<br/>as authenticated user"]
-        endOk(["END<br/>Authenticated access granted"])
+---
 
-        createToken --> returnToken --> storeToken --> openHome --> endOk
-    end
+## 5. Flow A — Authentication
 
-    credentialsValid -->|YES| createToken
+The user registers or logs in with email and password, receives a JWT, and then accesses only their own resources. There is no server-side session table.
 
-    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation or credential errors.<br/>Missing user and wrong password share one 401 message.<br/>Return nodes name the form where the flow continues; no long crossing arrows are drawn."]
+MVP auth only: register / login / logout (client clears the token). No admin, social login, 2FA, email confirmation, or password reset.
 
-    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
-    classDef formAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
-    classDef requestAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
-    classDef issueAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
-    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
-    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
-    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
-    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
+### Contract
 
-    class start startNode
-    class fillForm formAction
-    class sendRequest,findUser requestAction
-    class createToken,returnToken,storeToken,openHome issueAction
-    class clientValid,backendValid,credentialsValid decision
-    class clientError,validationError,loginError error
-    class returnClient,returnValidation,returnLogin restart
-    class endOk endNode
-    class legend legendBox
+- Passwords stored only as BCrypt (`users.password_hash`).
+- Email is trimmed and lowercased before store/lookup.
+- Register password length: 8–100 characters.
+- JWT (HS256): claims `sub` (user id), `email`, `iat`, `exp`; lifetime 24 hours (`app.jwt.expiration-ms`). The signing key is derived with SHA-256 of `JWT_SECRET` so short local secrets still work.
+- Frontend stores the token and sends `Authorization: Bearer …`.
+- Logout is client-only; the backend does not revoke tokens.
+- Ownership always comes from the JWT (`CurrentUser`). There is no `users.role` column; the filter assigns a fixed `ROLE_USER`.
+- Missing user and wrong password both return the same `401` message (`Invalid email or password`).
 
-    style form fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
-    style request fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
-    style issue fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
-```
+### Diagrams
 
-Missing user and wrong password both return the same `401` message (`Invalid email or password`) so login does not reveal whether an email is registered.
-
-#### Protected request with JWT
-
-Source file: [diagrams/jwt-protected-request.mmd](diagrams/jwt-protected-request.mmd)
-
-When a protected endpoint is called (for example `GET /auth/me`), the JWT is validated before the controller runs. If the token is missing or invalid, the filter does not establish an authenticated principal; Spring Security then rejects the request with `401`.
+| Topic | Source |
+| ----- | ------ |
+| Overview (register vs login) | [diagrams/authentication-flow.mmd](diagrams/authentication-flow.mmd) |
+| Register | [diagrams/register-flow.mmd](diagrams/register-flow.mmd) |
+| Login | [diagrams/login-flow.mmd](diagrams/login-flow.mmd) |
+| Protected request | [diagrams/jwt-protected-request.mmd](diagrams/jwt-protected-request.mmd) |
 
 ```mermaid
 sequenceDiagram
     participant Browser
     participant JwtFilter as JwtAuthFilter
     participant JwtService
-    participant SecurityContext
     participant SecurityRules as SecurityConfig
     participant Controller
     participant CurrentUser
@@ -320,549 +274,142 @@ sequenceDiagram
     Browser->>JwtFilter: Request with Bearer JWT
     JwtFilter->>JwtService: Validate token
     alt Token is valid
-        JwtService-->>JwtFilter: User ID and email
-        JwtFilter->>SecurityContext: Store UserPrincipal
-        JwtFilter->>SecurityRules: Continue request
-        SecurityRules->>Controller: Authenticated request allowed
-        Controller->>CurrentUser: Get authenticated user
-        CurrentUser->>SecurityContext: Read UserPrincipal
-        SecurityContext-->>CurrentUser: User ID and email
-        CurrentUser-->>Controller: Current user
+        JwtService-->>JwtFilter: User id and email
+        JwtFilter->>SecurityRules: Continue authenticated
+        SecurityRules->>Controller: Allowed
+        Controller->>CurrentUser: Read principal
         Controller-->>Browser: Protected response
     else Token missing or invalid
-        JwtFilter->>SecurityRules: Continue without authentication
+        JwtFilter->>SecurityRules: Continue anonymous
         SecurityRules-->>Browser: 401 Unauthorized
     end
 ```
 
-
-### Flow B — Document processing
-
-The user uploads a document, the system processes it, the user reviews the proposed fields, and an expense is saved only after explicit approval.
-
-#### Upload, mock processing, and review contract (implemented — Step 10)
-
-Step 10 runs **synchronous mock processing** inside the same `POST /documents` request after the `documents` row is saved. The response returns the **post-processing** status (`REVIEW_REQUIRED` or `PROCESSING_FAILED`). Real OCR and expense approval remain later steps; happy-path upload + review still creates **no** `expenses` row and there is **no** approve endpoint yet.
-
-- `POST /documents` — protected multipart (`file` part); success `201` with review DTO (metadata + `fileUrl` + nullable `extraction`). Order: validate → write file → insert `UPLOADED` → set `PROCESSING` → mock extract → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing DB work fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over orphaning disk without a row.
-- `GET /documents/{id}` — protected review DTO for the owner: metadata + `fileUrl` (`/documents/{id}/file`) + nullable `extraction`. Does **not** expose `storage_path`. Missing or foreign id → `404`.
-- `GET /documents/{id}/file` — protected; streams stored bytes for the owner (`Content-Type` from `mime_type`, inline disposition). Missing, foreign, or missing disk file → `404`.
-- `DELETE /documents/{id}` — protected hard delete of a pending document (cascades `document_extractions`) and the disk file. Allowed only when status is not `SAVED` (`SAVED` → `409`). Missing or foreign → `404`.
-- `POST /documents/{id}/process` — protected retry; only from `UPLOADED` or `PROCESSING_FAILED` (else `409`); wrong owner → `404`. Re-runs mock processing and overwrites the single extraction row if present.
-- `POST /documents/{id}/continue-manual` — protected; only from `PROCESSING_FAILED` (else `409`). Ensures an **empty** `document_extractions` row (all proposed fields null) and sets status `REVIEW_REQUIRED`.
-- Simulated failure (local testing): if `original_filename` contains `fail` (case-insensitive) → `PROCESSING_FAILED` and no usable extraction.
-- Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`.
-- Maximum file size: 5 MB (`5242880` bytes). Enforced in the app and by Spring multipart limits (`spring.servlet.multipart.max-file-size` / `max-request-size`).
-- Storage path pattern: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` — the client filename is never used for the path on disk.
-- `documents.storage_path` stays server-side; review responses expose `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt`, `fileUrl`, and nullable `extraction` only.
-- Owner comes from the JWT (`CurrentUser`), never from a body field.
-- Frontend review route: `#/review/:id` — loads review DTO + categories, previews the file via authenticated fetch → blob URL, editable form fields (no Approve yet).
-
-### Flow C — Expense exploration
-
-The user opens the expense list, filters expenses, views details, edits existing records, and sees aggregated information in the dashboard.
-
-```mermaid
-flowchart TB
-    %% Flow C — Expense exploration and dashboard
-    %% Expense fields in MVP: merchant · date · total · currency · category
-    %% derived from a saved Document. Dashboard summaries are calculated
-    %% from saved expenses; they are not a separate source of truth.
-    %% Layout: green centre line = success path. Side branches = filters,
-    %% empty results, edit/delete alternatives. No long crossing arrows.
-
-    start(["START<br/>Authenticated user"])
-
-    subgraph dashboard["1. Dashboard"]
-        direction TB
-        open_dash["Open dashboard"]
-        load_own["Load only the current user's<br/>saved expenses"]
-        view_summary["View expense summary<br/>calculated from saved expenses"]
-        show_widgets["Show period total · by category ·<br/>by merchant · recently added documents"]
-        go_list["Open expense list"]
-
-        open_dash --> load_own --> view_summary --> show_widgets --> go_list
-    end
-
-    start --> open_dash
-
-    subgraph listing["2. Expense list and filters"]
-        direction TB
-        list_view["Show expense list<br/>merchant · date · total · currency · category"]
-        apply_filters["Apply optional filters<br/>date from/to · category · merchant"]
-        filters_valid{"Filters valid?"}
-        filter_error["Show filter validation errors"]
-        return_filters(["RETURN TO FILTERS<br/>Correct date range or criteria"])
-        show_results{"Matching expenses found?"}
-        empty_state["Show empty state<br/>No expenses found"]
-        clear_filters["Clear filters"]
-        return_list_empty(["RETURN TO LIST<br/>After clearing filters"])
-        results["View matching expenses"]
-
-        list_view --> apply_filters --> filters_valid
-        filters_valid -->|NO| filter_error
-        filter_error --> return_filters
-        filters_valid -->|YES| show_results
-        show_results -->|NO| empty_state
-        empty_state --> clear_filters --> return_list_empty
-        show_results -->|YES| results
-    end
-
-    go_list --> list_view
-
-    subgraph details["3. Expense details"]
-        direction TB
-        open_details["Open expense details"]
-        show_doc["Show confirmed fields beside<br/>the original uploaded Document"]
-        user_action{"User action"}
-
-        open_details --> show_doc --> user_action
-    end
-
-    results --> open_details
-
-    subgraph actions["4. Edit, delete or return"]
-        direction TB
-        edit_form["Edit expense fields<br/>merchant · date · total · currency · category"]
-        edit_valid{"Edited data valid?"}
-        edit_error["Show field-level errors"]
-        return_edit(["RETURN TO EDIT FORM<br/>Correct the highlighted fields"])
-        save_edit["Save updated expense"]
-        confirm_delete{"Confirm delete?"}
-        cancel_delete(["RETURN TO DETAILS<br/>Deletion cancelled"])
-        delete_expense["Delete expense"]
-        refresh_stats["Recalculate dashboard summary<br/>from remaining saved expenses"]
-        return_list["Return to expense list"]
-        end_ok(["END<br/>Exploration complete"])
-
-        edit_form --> edit_valid
-        edit_valid -->|NO| edit_error
-        edit_error --> return_edit
-        edit_valid -->|YES| save_edit
-        save_edit --> refresh_stats
-
-        confirm_delete -->|NO| cancel_delete
-        confirm_delete -->|YES| delete_expense
-        delete_expense --> refresh_stats
-
-        refresh_stats --> return_list
-        return_list --> end_ok
-    end
-
-    user_action -->|EDIT| edit_form
-    user_action -->|DELETE| confirm_delete
-    user_action -->|RETURN| return_list
-
-    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation errors. Grey/orange branches are empty results or cancelled delete.<br/>Dashboard statistics are always recalculated from saved expenses, never stored as the source of truth."]
-
-    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
-    classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
-    classDef dashAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
-    classDef listAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
-    classDef detailAction fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef saveAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
-    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
-    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
-    classDef emptyAlt fill:#fff7ed,stroke:#f97316,color:#9a3412
-    classDef pause fill:#e0f2fe,stroke:#0284c7,color:#075985
-    classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
-    classDef deleteAction fill:#f1f5f9,stroke:#64748b,color:#0f172a
-    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
-
-    class start startNode
-    class open_dash,load_own,view_summary,show_widgets,go_list dashAction
-    class list_view,apply_filters,results listAction
-    class open_details,show_doc,edit_form detailAction
-    class save_edit,refresh_stats,return_list saveAction
-    class filters_valid,show_results,user_action,edit_valid,confirm_delete decision
-    class filter_error,edit_error error
-    class return_filters,return_edit,cancel_delete restart
-    class empty_state,clear_filters,return_list_empty emptyAlt
-    class delete_expense deleteAction
-    class end_ok endNode
-    class legend legendBox
-
-    style dashboard fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
-    style listing fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
-    style details fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
-    style actions fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
-```
-
-
-
 ---
 
+## 6. Flow B — Document processing
 
+### 6.1 Goal
 
-# 6. Flow B — Document processing
+Turn an uploaded receipt/invoice into a **user-approved** expense without silently trusting OCR or AI output.
 
+### 6.2 Happy path (product)
 
+1. User selects a file; frontend checks type/size for usability.
+2. Backend authenticates and re-validates the file (trust boundary).
+3. File is stored; `documents` row created; processing produces proposed fields.
+4. Status becomes `REVIEW_REQUIRED`; UI shows file + editable form.
+5. User corrects values and **approves**.
+6. Backend validates again, creates `expenses`, sets document `SAVED`.
+7. Expense appears in list / filters / dashboard.
 
-## 6.1 Goal
+Full activity diagram (including failures and manual continue): [diagrams/document-processing-flow.mmd](diagrams/document-processing-flow.mmd) (SVG: [document-processing-flow.svg](diagrams/document-processing-flow.svg)).
 
-Convert a user-provided receipt or invoice into a valid, user-approved expense without silently trusting OCR or AI output.
+### 6.3 Upload, mock processing, and review (current contract)
 
-## 6.2 Preconditions
+Processing runs **synchronously** inside `POST /documents` after the row is saved. The `201` body already has the post-processing status. Real OCR libraries are not used yet — `MockExtractionService` fills deterministic sample fields (merchant `Demo Cafe`, amount `12.50`, `EUR`, today’s date; category left null on purpose). Approve / `expenses` insert is not exposed yet.
 
-- The user is authenticated.
-- The user is allowed to upload a document.
-- The selected file uses a supported MIME type (`image/jpeg`, `image/png`, or `application/pdf`) and is at most 5 MB.
+**Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → mock extract → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 
+**Rules:**
 
+- MIME: `image/jpeg`, `image/png`, `application/pdf`; max **5 MB**.
+- Disk path: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` (client filename is not used for the path).
+- Filename containing `fail` (case-insensitive) → `PROCESSING_FAILED`, no usable extraction.
+- `POST …/process` — retry from `UPLOADED` or `PROCESSING_FAILED` only (`409` otherwise).
+- `POST …/continue-manual` — from `PROCESSING_FAILED` only; empty extraction row + `REVIEW_REQUIRED`.
+- `DELETE` — hard-delete pending document (cascade extraction) + disk file; not allowed for `SAVED` (`409`).
+- Frontend `#/review/:id` loads review DTO + categories and previews via authenticated blob URL.
 
-## 6.3 Successful path
+### 6.4 Status model
 
-1. The user opens the upload page and selects a file.
-2. The frontend performs an initial format and size check.
-3. The file is uploaded to the backend.
-4. The backend authenticates the request and repeats all security and file validations.
-5. The original file is stored and a document record is created with status `UPLOADED`.
-6. The document status changes to `PROCESSING`.
-7. OCR extracts raw text from the document.
-8. The extraction component converts the raw text into proposed structured fields:
-  - merchant;
-  - date;
-  - total amount;
-  - currency;
-  - category.
-9. The backend validates and normalises the proposed values.
-10. The document status changes to `REVIEW_REQUIRED`.
-11. The frontend displays the original document next to an editable form.
-12. The user checks and corrects the proposed values.
-13. The user explicitly approves the data.
-14. The backend validates the corrected data again.
-15. In one consistent save operation, the backend:
-  - creates the expense;
-    - links it to the document and owner;
-    - stores the confirmed values;
-    - changes the document status to `SAVED`.
-16. The user is redirected to the saved expense details.
-17. The new expense becomes visible in the expense list, filters, and dashboard calculations.
+| Status | Meaning |
+| ------ | ------- |
+| `UPLOADED` | File stored; processing not finished |
+| `PROCESSING` | Extraction running |
+| `REVIEW_REQUIRED` | Ready for review (full, partial, or empty manual form) |
+| `PROCESSING_FAILED` | Auto processing failed; retry, continue manually, or delete |
+| `SAVED` | User approved; an `expenses` row exists |
 
+`DELETED` is not a status — pending delete is a hard delete of the row and file.
 
+When a saved expense is hard-deleted later (Flow C), the document returns to `REVIEW_REQUIRED` and the file is kept.
 
-## 6.4 Alternative and failure paths
-
-
-
-### Invalid file before upload
-
-The frontend rejects an unsupported type or oversized file and asks the user to select another one. No document is created.
-
-### Invalid or unsafe file detected by the backend
-
-The backend rejects the upload even if the frontend accepted it. Client-side validation is only a usability feature and is never trusted as the security boundary.
-
-### File storage fails
-
-The upload is rejected, incomplete data is cleaned up, and the user receives a retryable error. No usable document record should remain orphaned.
-
-### OCR returns partial text
-
-The system continues with the available text. Extracted fields may be incomplete, but the user still reaches the review form and can fill them manually.
-
-### OCR or structured extraction fails completely
-
-The document is marked `PROCESSING_FAILED`. The user can:
-
-- retry processing (`POST /documents/{id}/process`);
-- continue with an empty manual form (`POST /documents/{id}/continue-manual`) — the backend creates or clears a `document_extractions` row with all proposed fields null, then sets `REVIEW_REQUIRED`;
-- delete the uploaded document (`DELETE /documents/{id}`).
-
-A failed AI operation must not permanently block manual expense creation.
-
-### Extracted values are invalid or ambiguous
-
-The system does not save them automatically. Invalid fields are left empty or marked for attention on the review screen.
-
-Examples:
-
-- no total amount was found;
-- the date cannot be parsed;
-- the currency is unsupported;
-- the merchant name is missing.
-
-
-
-### User leaves the review page
-
-The document remains in `REVIEW_REQUIRED`, and the user can return later. No expense is included in statistics before approval.
-
-### User deletes the pending document
-
-The pending record and its stored file are removed according to the storage cleanup rules. No expense is created.
-
-### Final validation fails
-
-The review form is shown again with field-level errors. The document remains in `REVIEW_REQUIRED`.
-
-### Database save fails
-
-The expense must not be partially created. The document remains available for review and retry, and the user receives an error message.
-
-## 6.5 Detailed activity diagram
-
-```mermaid
-flowchart TB
-    %% Flow B — Document processing
-    %% Layout: blue/green centre line = normal path.
-    %% Red = errors. Orange = manual alternatives.
-    %% Restart / return / continue nodes name the next step; no long backward arrows.
-
-    start(["START<br/>Open Upload page"])
-
-    subgraph upload["1. Upload and validation"]
-        direction TB
-        select["Select image or PDF"]
-        client_check{"Frontend format and size<br/>check passes?"}
-        upload_file["Upload file to backend"]
-        server_check{"Authentication and backend<br/>validation pass?"}
-        store["Store original file and<br/>create Document (UPLOADED)"]
-        storage_ok{"Storage succeeds?"}
-
-        file_error["Show unsupported type or<br/>file-size error"]
-        request_error["Reject request and<br/>show authentication or validation error"]
-        storage_error["Clean partial data and<br/>show retryable storage error"]
-
-        retry_upload_1(["RESTART<br/>Begin again from file selection"])
-        retry_upload_2(["RESTART<br/>Begin again from file selection"])
-        retry_upload_3(["RESTART<br/>Begin again from file selection"])
-
-        select --> client_check
-        client_check -->|YES| upload_file
-        client_check -->|NO| file_error
-        file_error --> retry_upload_1
-
-        upload_file --> server_check
-        server_check -->|YES| store
-        server_check -->|NO| request_error
-        request_error --> retry_upload_2
-
-        store --> storage_ok
-        storage_ok -->|NO| storage_error
-        storage_error --> retry_upload_3
-    end
-
-    start --> select
-
-    subgraph processing["2. Automated processing"]
-        direction TB
-        set_processing["Set status PROCESSING"]
-        ocr["Run OCR"]
-        ocr_check{"OCR result usable?"}
-        extract["Extract proposed fields<br/>merchant · date · total · currency · category"]
-        normalize["Validate and normalise<br/>proposed values"]
-        review_required["Set status REVIEW_REQUIRED"]
-
-        failed["Set status PROCESSING_FAILED"]
-        failed_choice{"User decision"}
-        manual["Open an empty manual form"]
-        delete_failed["Delete pending Document<br/>and stored file"]
-
-        retry_processing(["RESTART<br/>Begin again from PROCESSING"])
-        continue_manual(["CONTINUE AT SECTION 3<br/>User review with an empty form"])
-        no_expense_1(["END<br/>No expense created"])
-
-        set_processing --> ocr --> ocr_check
-        ocr_check -->|YES / PARTIAL| extract
-        extract --> normalize --> review_required
-
-        ocr_check -->|NO| failed
-        failed --> failed_choice
-        failed_choice -->|RETRY| retry_processing
-        failed_choice -->|MANUAL| manual
-        failed_choice -->|DELETE| delete_failed
-        manual --> continue_manual
-        delete_failed --> no_expense_1
-    end
-
-    storage_ok -->|YES| set_processing
-
-    subgraph review["3. User review"]
-        direction TB
-        show_review["Show the original document beside<br/>an editable form"]
-        user_action{"User action"}
-        approve["Approve proposed or<br/>corrected data"]
-        validate{"Confirmed data valid?"}
-        field_errors["Show field-level errors"]
-        delete_review["Delete pending Document<br/>and stored file"]
-
-        resume_review(["PAUSED<br/>Resume later from the review screen"])
-        return_review_1(["RETURN TO REVIEW<br/>Correct the highlighted fields"])
-        no_expense_2(["END<br/>No expense created"])
-
-        show_review --> user_action
-        user_action -->|APPROVE| approve
-        user_action -->|LEAVE| resume_review
-        user_action -->|DELETE| delete_review
-        delete_review --> no_expense_2
-
-        approve --> validate
-        validate -->|NO| field_errors
-        field_errors --> return_review_1
-    end
-
-    review_required --> show_review
-    continue_manual --> show_review
-
-    subgraph save["4. Final save"]
-        direction TB
-        create_expense["Atomically create Expense, link Document,<br/>and store confirmed values"]
-        save_check{"Database save succeeds?"}
-        set_saved["Set Document status SAVED"]
-        open_details["Open saved expense details"]
-        success(["SUCCESS<br/>Expense appears in details, list,<br/>filters and dashboard"])
-        save_error["Keep review data and<br/>show retry option"]
-        return_review_2(["RETURN TO REVIEW<br/>Retry after the save error"])
-
-        create_expense --> save_check
-        save_check -->|YES| set_saved
-        set_saved --> open_details --> success
-        save_check -->|NO| save_error
-        save_error --> return_review_2
-    end
-
-    validate -->|YES| create_expense
-
-    legend["Reading rule: follow the blue/green centre line for the normal path.<br/>Red branches are errors. Orange branches are manual alternatives.<br/>Restart and return nodes name the step where the flow continues; no long backward arrows are drawn."]
-
-    %% Node colours matching the SVG palette
-    classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
-    classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
-    classDef uploadAction fill:#dbeafe,stroke:#3b82f6,color:#0f172a
-    classDef processAction fill:#ede9fe,stroke:#8b5cf6,color:#0f172a
-    classDef decision fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef reviewGate fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#0f172a
-    classDef reviewAction fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef saveAction fill:#dcfce7,stroke:#16a34a,color:#0f172a
-    classDef successNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
-    classDef error fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
-    classDef restart fill:#fff1f2,stroke:#e11d48,color:#881337
-    classDef orangeAlt fill:#fff7ed,stroke:#f97316,color:#9a3412
-    classDef orangeAction fill:#ffedd5,stroke:#f97316,color:#0f172a
-    classDef pause fill:#e0f2fe,stroke:#0284c7,color:#075985
-    classDef endNeutral fill:#f1f5f9,stroke:#64748b,color:#334155
-    classDef deleteAction fill:#f1f5f9,stroke:#64748b,color:#0f172a
-    classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
-
-    class start startNode
-    class select action
-    class upload_file,store uploadAction
-    class set_processing,ocr,extract,normalize processAction
-    class client_check,server_check,storage_ok,ocr_check,user_action,validate,save_check decision
-    class failed_choice orangeAction
-    class review_required reviewGate
-    class show_review,approve reviewAction
-    class create_expense,set_saved,open_details saveAction
-    class success successNode
-    class file_error,request_error,storage_error,failed,field_errors,save_error error
-    class retry_upload_1,retry_upload_2,retry_upload_3,return_review_1,return_review_2 restart
-    class retry_processing,continue_manual,manual orangeAlt
-    class resume_review pause
-    class no_expense_1,no_expense_2 endNeutral
-    class delete_failed,delete_review deleteAction
-    class legend legendBox
-
-    %% Section background colours
-    style upload fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
-    style processing fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
-    style review fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
-    style save fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
-```
-
-
-
-
-
-## 6.6 Document status model
-
-Persisted document statuses for the MVP:
-
-
-| Status              | Meaning                                                                   |
-| ------------------- | ------------------------------------------------------------------------- |
-| `UPLOADED`          | File stored; processing not started or about to start                     |
-| `PROCESSING`        | OCR / extraction running                                                  |
-| `REVIEW_REQUIRED`   | Ready for user review (full, partial, or empty manual form)               |
-| `PROCESSING_FAILED` | Automatic processing failed; user may retry, continue manually, or delete |
-| `SAVED`             | User approved; an `expenses` row exists                                   |
-
-
-`DELETED` is **not** a persisted status. Pending document deletion is a **hard delete** of the `documents` row (cascading `document_extractions`) and removal of the stored file.
-
-When an expense is hard-deleted in Flow C, the linked document returns to `REVIEW_REQUIRED` so the user can re-approve or delete the pending document. The original file remains available.
+State diagram: [diagrams/document-status-model.mmd](diagrams/document-status-model.mmd).
 
 ```mermaid
 stateDiagram-v2
     [*] --> UPLOADED: valid upload stored
     UPLOADED --> PROCESSING: processing starts
     PROCESSING --> REVIEW_REQUIRED: full or partial extraction
-    PROCESSING --> PROCESSING_FAILED: processing cannot produce a result
+    PROCESSING --> PROCESSING_FAILED: cannot produce a result
     PROCESSING_FAILED --> PROCESSING: retry
     PROCESSING_FAILED --> REVIEW_REQUIRED: continue manually
-    PROCESSING_FAILED --> [*]: hard delete pending document and file
-    REVIEW_REQUIRED --> REVIEW_REQUIRED: edit, validation error, or save retry
-    REVIEW_REQUIRED --> SAVED: user approves valid data
-    REVIEW_REQUIRED --> [*]: hard delete pending document and file
-    SAVED --> REVIEW_REQUIRED: expense hard-deleted in Flow C
-    SAVED --> [*]
+    PROCESSING_FAILED --> [*]: hard delete
+    REVIEW_REQUIRED --> SAVED: user approves
+    REVIEW_REQUIRED --> [*]: hard delete
+    SAVED --> REVIEW_REQUIRED: expense hard-deleted
 ```
 
+### 6.5 Important failure / alternative paths
 
+| Situation | Behaviour |
+| --------- | --------- |
+| Invalid file (client or server) | Reject; no document |
+| Storage write fails | Clean up; retryable error |
+| Partial extraction | Still go to review; user fills gaps |
+| Total processing failure | `PROCESSING_FAILED` → retry, continue-manual, or delete |
+| User leaves review | Stays `REVIEW_REQUIRED`; not in statistics |
+| Delete pending | Remove DB row + file; no expense |
+| Approve validation / DB save fails | Stay on review; no partial expense |
 
+### 6.6 Functional rules
 
+1. Extraction never creates a final expense by itself — explicit approval is required.
+2. Backend repeats important validations (frontend checks are UX only).
+3. A user sees only their own documents and expenses.
+4. Partial extraction is useful; complete failure must still allow manual entry.
+5. Final expense save is atomic; pending/failed documents stay out of dashboard maths.
+6. MVP uses hard delete only (no `deleted_at`).
+7. Original file and confirmed expense stay linked after approve.
 
-## 6.7 Functional rules
+### 6.7 Required fields before approval
 
-1. Automatic extraction never creates a final expense by itself.
-2. Explicit user approval is required before an expense affects lists or statistics.
-3. All important validations are repeated on the backend.
-4. A user can access only documents and expenses that they own.
-5. Partial extraction is considered useful and should lead to manual review, not failure.
-6. Complete processing failure must still allow manual entry.
-7. The final expense save must be atomic: either the complete expense is saved, or no partial expense remains.
-8. Pending and failed documents are excluded from dashboard calculations.
-9. The original document and the confirmed structured data remain linked.
-10. Technical error details are logged, while the user receives a safe and understandable message.
-11. MVP uses hard delete only (no soft delete / `deleted_at`).
-12. Flow C expense deletion hard-deletes the expense and sets the document status back to `REVIEW_REQUIRED`.
+- `expense_date` present  
+- `total_amount` > 0  
+- `currency` in `{EUR, USD, GBP}`  
+- `category_id` → active category  
+- Owner via `documents.user_id`  
 
+`merchant` may be null.
 
+---
 
-## 6.8 Required fields before approval
+## 7. Flow C — Expense exploration
 
-Before an expense may be created, the confirmed values must satisfy:
+After expenses exist, the user uses a dashboard, filtered list, details, edit, and delete. Dashboard numbers are always calculated from saved `expenses` rows (not a separate store). Deleting an expense returns its document to `REVIEW_REQUIRED`.
 
-- `expense_date` present;
-- `total_amount` greater than zero;
-- `currency` in `{EUR, USD, GBP}`;
-- `category_id` referencing an active category;
-- authenticated owner via `documents.user_id`.
+Activity diagram: [diagrams/expense-exploration-flow.mmd](diagrams/expense-exploration-flow.mmd).
 
-`merchant` may remain null when it cannot be recognised or is not present on the document.
+---
 
-## 6.9 Domain entities and database model
+## 8. Data model
 
-PostgreSQL is the target database. All primary and foreign keys use `BIGINT` identity columns.
+PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/`. Seeded categories: `db/migrations/002_seed_categories.sql` (Food & Drink, Transport, Shopping, Housing, Health, Entertainment, Utilities, Travel, Education, Other).
 
 ### Table responsibilities
 
+| Table | Responsibility |
+| ----- | -------------- |
+| `users` | Auth identity (`email`, `password_hash`) |
+| `documents` | Uploaded file metadata + processing status |
+| `document_extractions` | Untrusted proposed fields for review (at most one per document) |
+| `categories` | Reusable labels; inactive kept for history but not for new picks |
+| `expenses` | User-approved financial record; source of truth for list/dashboard |
 
-| Table                  | Responsibility                                                          |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `users`                | Authentication identity and account credentials                         |
-| `documents`            | Uploaded file metadata and processing lifecycle status                  |
-| `document_extractions` | Untrusted OCR/AI proposed fields for one document (review input only)   |
-| `categories`           | Reusable category labels for filtering and analytics                    |
-| `expenses`             | User-approved financial record; source of truth for lists and dashboard |
+Expense ownership: `expenses.document_id → documents.user_id` (no `expenses.user_id`). No `users.role`.
 
-
-Ownership of an expense is derived as `expenses.document_id → documents.user_id`. There is no `expenses.user_id` and no `users.role` column in the MVP.
-
-### Entity-relationship diagram
-
-Source file: [diagrams/er-diagram.mmd](diagrams/er-diagram.mmd)
+ER diagram: [diagrams/er-diagram.mmd](diagrams/er-diagram.mmd).
 
 ```mermaid
 erDiagram
@@ -871,291 +418,77 @@ erDiagram
     documents ||--o| expenses : may_produce
     categories ||--o{ expenses : classifies
     categories ||--o{ document_extractions : "optional proposed"
-
-    users {
-        BIGINT id PK
-        VARCHAR email UK
-        VARCHAR password_hash
-        TIMESTAMP created_at
-        TIMESTAMP updated_at
-    }
-
-    documents {
-        BIGINT id PK
-        BIGINT user_id FK
-        VARCHAR status
-        VARCHAR storage_path
-        VARCHAR original_filename
-        VARCHAR mime_type
-        INTEGER file_size_bytes
-        TIMESTAMP created_at
-        TIMESTAMP updated_at
-    }
-
-    document_extractions {
-        BIGINT id PK
-        BIGINT document_id FK_UK
-        TEXT raw_ocr_text
-        VARCHAR proposed_merchant
-        DATE proposed_date
-        DECIMAL proposed_amount
-        CHAR proposed_currency
-        BIGINT proposed_category_id FK
-        TIMESTAMP created_at
-        TIMESTAMP updated_at
-    }
-
-    categories {
-        BIGINT id PK
-        VARCHAR name UK
-        VARCHAR slug UK
-        BOOLEAN is_active
-        TIMESTAMP created_at
-    }
-
-    expenses {
-        BIGINT id PK
-        BIGINT document_id FK_UK
-        BIGINT category_id FK
-        VARCHAR merchant
-        DATE expense_date
-        DECIMAL total_amount
-        CHAR currency
-        TIMESTAMP created_at
-        TIMESTAMP updated_at
-    }
 ```
-
-
-
-
-
-### Column summaries
-
-
-
-#### `users`
-
-
-| Column          | Type         | Nullable | Constraints  |
-| --------------- | ------------ | -------- | ------------ |
-| `id`            | BIGINT       | no       | PK, identity |
-| `email`         | VARCHAR(255) | no       | UNIQUE       |
-| `password_hash` | VARCHAR(255) | no       |              |
-| `created_at`    | TIMESTAMP    | no       |              |
-| `updated_at`    | TIMESTAMP    | no       |              |
-
-
-
-
-#### `documents`
-
-
-| Column              | Type         | Nullable | Constraints                                                               |
-| ------------------- | ------------ | -------- | ------------------------------------------------------------------------- |
-| `id`                | BIGINT       | no       | PK, identity                                                              |
-| `user_id`           | BIGINT       | no       | FK → `users(id)` ON DELETE CASCADE                                        |
-| `status`            | VARCHAR(32)  | no       | `UPLOADED`, `PROCESSING`, `REVIEW_REQUIRED`, `PROCESSING_FAILED`, `SAVED` |
-| `storage_path`      | VARCHAR(500) | no       |                                                                           |
-| `original_filename` | VARCHAR(255) | no       |                                                                           |
-| `mime_type`         | VARCHAR(100) | no       |                                                                           |
-| `file_size_bytes`   | INTEGER      | no       | CHECK `> 0`                                                               |
-| `created_at`        | TIMESTAMP    | no       |                                                                           |
-| `updated_at`        | TIMESTAMP    | no       |                                                                           |
-
-
-Indexes: `(user_id, status)`, `(user_id, created_at DESC)`.
-
-
-
-#### `document_extractions`
-
-
-| Column                 | Type          | Nullable | Constraints                                    |
-| ---------------------- | ------------- | -------- | ---------------------------------------------- |
-| `id`                   | BIGINT        | no       | PK, identity                                   |
-| `document_id`          | BIGINT        | no       | FK → `documents(id)` ON DELETE CASCADE; UNIQUE |
-| `raw_ocr_text`         | TEXT          | yes      |                                                |
-| `proposed_merchant`    | VARCHAR(255)  | yes      |                                                |
-| `proposed_date`        | DATE          | yes      |                                                |
-| `proposed_amount`      | DECIMAL(12,2) | yes      |                                                |
-| `proposed_currency`    | CHAR(3)       | yes      | when set: `EUR`, `USD`, or `GBP`               |
-| `proposed_category_id` | BIGINT        | yes      | FK → `categories(id)` ON DELETE SET NULL       |
-| `created_at`           | TIMESTAMP     | no       |                                                |
-| `updated_at`           | TIMESTAMP     | no       |                                                |
-
-
-On processing retry, this single row is updated or replaced. No extraction history table in the MVP.
-
-
-
-#### `categories`
-
-
-| Column       | Type         | Nullable | Constraints    |
-| ------------ | ------------ | -------- | -------------- |
-| `id`         | BIGINT       | no       | PK, identity   |
-| `name`       | VARCHAR(100) | no       | UNIQUE         |
-| `slug`       | VARCHAR(100) | no       | UNIQUE         |
-| `is_active`  | BOOLEAN      | no       | default `true` |
-| `created_at` | TIMESTAMP    | no       |                |
-
-
-Categories are seeded at deploy time. Inactive categories may remain on historical expenses but must not be selectable for new or edited expenses.
-
-
-
-#### `expenses`
-
-
-| Column         | Type          | Nullable | Constraints                                     |
-| -------------- | ------------- | -------- | ----------------------------------------------- |
-| `id`           | BIGINT        | no       | PK, identity                                    |
-| `document_id`  | BIGINT        | no       | FK → `documents(id)` ON DELETE RESTRICT; UNIQUE |
-| `category_id`  | BIGINT        | no       | FK → `categories(id)`                           |
-| `merchant`     | VARCHAR(255)  | yes      |                                                 |
-| `expense_date` | DATE          | no       |                                                 |
-| `total_amount` | DECIMAL(12,2) | no       | CHECK `> 0`                                     |
-| `currency`     | CHAR(3)       | no       | `EUR`, `USD`, or `GBP`                          |
-| `created_at`   | TIMESTAMP     | no       |                                                 |
-| `updated_at`   | TIMESTAMP     | no       |                                                 |
-
-
-Indexes: unique on `document_id`; `(expense_date)`; `(category_id)`; `(merchant)`. Owner filtering always joins `documents.user_id`.
-
-
 
 ### Cardinalities
 
+| Relationship | Cardinality |
+| ------------ | ----------- |
+| User → Document | 1 : N |
+| Document → DocumentExtraction | 1 : 0..1 |
+| Document → Expense | 1 : 0..1 |
+| Category → Expense | 1 : N |
 
-| Relationship                  | Cardinality |
-| ----------------------------- | ----------- |
-| User → Document               | 1 : N       |
-| Document → DocumentExtraction | 1 : 0..1    |
-| Document → Expense            | 1 : 0..1    |
-| Category → Expense            | 1 : N       |
-| DocumentExtraction → Category | N : 0..1    |
+### Database-enforceable invariants (summary)
 
+- Unique email, category name/slug; at most one extraction and one expense per document.
+- Hard-deleting a document cascades its extraction; expense FK to document is `ON DELETE RESTRICT`.
+- Amount and file size checks; currency allowlist when set.
 
+### Application rules (summary)
 
+- Writing extractions must never insert an expense.
+- Expense is created only on explicit approve, in one transaction with `status = SAVED`.
+- No expense while status is `UPLOADED` / `PROCESSING` / `REVIEW_REQUIRED` / `PROCESSING_FAILED`.
+- Lists and dashboard query `expenses` only.
+- Owner isolation on every document/expense load.
+- Pending delete removes document + file; Flow C expense delete keeps the file and sets `REVIEW_REQUIRED`.
 
-### Database-enforceable invariants
-
-1. Every document has a user.
-2. At most one document extraction per document.
-3. At most one expense per document.
-4. Every expense references an existing document and category.
-5. `expenses.total_amount > 0`.
-6. `documents.file_size_bytes > 0`.
-7. Unique `users.email`, `categories.name`, `categories.slug`.
-8. Hard-deleting a document cascades to its extraction.
-9. Optional CHECK: `currency IN ('EUR','USD','GBP')` and the same for non-null `proposed_currency`.
-
-
-
-### Application-enforced business rules
-
-These must be enforced in application transactions and validation (not only by FK/CHECK):
-
-1. Creating or updating `document_extractions` must never insert an `expenses` row.
-2. An expense is created only after explicit user approval, in one transaction that validates confirmed fields, inserts the expense, and sets `documents.status = SAVED`.
-3. Document status transitions follow the status model (for example, no jump from `UPLOADED` to `SAVED`).
-4. An expense may exist only when `documents.status = SAVED`; after successful approval, `SAVED` implies an expense exists.
-5. No expense exists while status is `UPLOADED`, `PROCESSING`, `REVIEW_REQUIRED`, or `PROCESSING_FAILED`.
-6. Dashboard and list queries use `expenses` only; pending and failed documents are excluded.
-7. Owner isolation: load documents and expenses only where `documents.user_id` equals the current user.
-8. Currency allowlist: only `EUR`, `USD`, `GBP`.
-9. New and edited expenses must use a category with `is_active = true`.
-10. Failed save must roll back so no partial expense remains.
-11. Pending document delete hard-deletes the document (cascading extraction) and removes the stored file; no expense exists yet.
-12. Flow C expense delete hard-deletes the expense and sets the document to `REVIEW_REQUIRED` (file kept).
-13. AI free-text category suggestions are mapped to `proposed_category_id` when possible; otherwise left null.
-
-
-
-## 6.10 Completion criteria for Flow B
-
-Flow B is complete when a user can:
-
-1. upload a valid real-world document;
-2. receive full, partial, or failed extraction feedback;
-3. reach a review form in all recoverable cases;
-4. correct or manually enter the required data;
-5. approve and save a valid expense;
-6. return later to an unfinished review;
-7. see the saved expense in the expense list and dashboard;
-8. never see an unapproved document counted as an expense.
-
-
-
-## 6.11 Open implementation decisions
-
-These questions remain open until the relevant implementation phase:
-
-- Whether PDF support includes only digital PDFs or also scanned PDFs.
-- Which OCR engine or service is used (Step 10 uses a deterministic mock only; no OCR libraries).
-- Which AI extraction approach is used after the mock is replaced.
-- Whether raw OCR text is retained long-term and for how long.
-- Retry limits and timeout behaviour.
-- Exact seeded category `name` / `slug` pairs (a provisional seed exists in `db/migrations/002_seed_categories.sql` and may be refined).
-- Whether field-level confidence scores are introduced after the MVP.
-
-Resolved for MVP upload limits (Step 9) and mock processing / review (Step 10):
-
-- Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`.
-- Maximum upload size: 5 MB (`5242880` bytes), also configured as Spring multipart max file/request size.
-- On-disk layout: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` (extension derived from allowed MIME; client filename is not trusted for the path).
-- Processing runs **synchronously** inside `POST /documents` after the `UPLOADED` row is saved; the create response already carries the post-processing status.
-- Mock success writes a partial `document_extractions` row and sets `REVIEW_REQUIRED`; filename containing `fail` (case-insensitive) sets `PROCESSING_FAILED`.
-- Manual continue after failure creates/clears an **empty** `document_extractions` row (all proposed fields null) and sets `REVIEW_REQUIRED`.
-- `GET /documents/{id}` returns the owner-scoped review DTO (metadata + `fileUrl` + nullable `extraction`); file bytes are served separately at `GET /documents/{id}/file`.
-- Pending hard delete via `DELETE /documents/{id}` (not `SAVED`); no approve / expense creation in Step 10.
-
-Resolved for MVP database design:
-
-- Five tables: `users`, `documents`, `document_extractions`, `categories`, `expenses`.
-- BIGINT identity keys; PostgreSQL.
-- Currencies: `EUR`, `USD`, `GBP`.
-- Hard delete only; no soft delete.
-- No `users.role`; no `expenses.user_id`.
-- Flow C expense hard-delete returns the document to `REVIEW_REQUIRED`.
-
-Resolved for MVP technology stack:
-- Backend: Java 21+ + Spring Boot 3 (REST JSON API).
-- API authentication: JWT bearer (Spring Security); BCrypt password hashes; public `/auth/register` and `/auth/login`; protected resources use `Authorization: Bearer` and ownership from the authenticated user id.
-- Validation at API boundaries: Jakarta Bean Validation on DTOs.
-- Persistence: Spring Data JPA (Hibernate), with schema controlled by SQL migrations in `db/migrations/` (Hibernate should not generate DDL).
-- Frontend: Vite + plain JavaScript (hash routing + `fetch`); JWT stored in the browser for subsequent API calls.
-- File storage for MVP uploads: local Docker volume (`UPLOAD_DIR`).
+Column-level detail lives in `001_create_mvp_schema.sql` and the ER diagram source — this doc does not repeat every column.
 
 ---
 
+## 9. Open decisions
 
+Still open until the relevant phase:
 
-# 7. Initial architectural principles
+- Digital-only PDF vs scanned PDF support depth.
+- Which OCR engine / AI extraction approach replaces the mock.
+- How long to keep raw OCR text.
+- Retry limits and timeouts.
+- Whether field-level confidence scores are needed after MVP.
+- Exact category labels may still be refined (slugs should stay stable).
 
-The following principles are accepted for the project:
+Already decided:
+
+- Sync processing in the upload request (mock today).
+- Manual-continue creates/clears an **empty** `document_extractions` row.
+- File bytes via `GET /documents/{id}/file`; review DTO includes `fileUrl`.
+- Upload MIME/size and `{UPLOAD_DIR}/{userId}/{uuid}{ext}` layout.
+- Currencies `EUR` / `USD` / `GBP`; hard delete only; no `users.role` / no `expenses.user_id`.
+
+---
+
+## 10. Principles
 
 - **Human-in-the-loop:** AI proposes; the user confirms.
-- **Backend as trust boundary:** security and business validation do not depend on the frontend.
-- **Graceful degradation:** partial or failed AI processing falls back to manual entry.
-- **Clear ownership:** every document and expense belongs to exactly one user in the MVP.
-- **No premature overengineering:** infrastructure and AI complexity are added only when justified by a real requirement.
-- **Documentation follows reality:** this document must be updated when implementation decisions change.
+- **Backend as trust boundary:** security and business rules do not depend on the frontend.
+- **Graceful degradation:** partial or failed extraction falls back to manual entry.
+- **Clear ownership:** every document and expense belongs to one user in the MVP.
+- **No premature overengineering:** add infrastructure and AI complexity only when needed.
+- **Documentation follows reality:** update this file when decisions change.
 
+---
 
+## 11. Change log
 
-# 8. Change log
-
-
-| Date       | Change                                                                                                                             |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-09-08 | Step 10: sync mock processing on upload; review DTO + `GET /documents/{id}/file`; retry / continue-manual / pending DELETE; empty extraction on manual-continue; approve/expenses still deferred. |
-| 2026-07-31 | Resolved upload MIME/size limits and storage path rules; documented `POST /documents` and `GET /documents/{id}` upload contract (status `UPLOADED` only; no extraction/expense on create). |
-| 2026-07-27 | Replaced Flow A with separate register/login diagrams (START + phased subgraphs, no backward error arrows), documented JWT authentication contract and protected-request sequence; updated stack notes and README for implemented auth. |
-| 2026-07-17 | Defined MVP relational model (users, documents, document_extractions, categories, expenses), ER diagram, and application DB rules. |
-| 2026-07-16 | Added Flow A authentication and Flow C expense exploration activity diagrams.                                                      |
-| 2026-07-14 | Created the initial architecture draft and defined Flow B for document processing.                                                 |
-| 2026-07-21 | Chosen tech stack: Java + Spring Boot + Spring Data JPA; frontend Vite + plain JavaScript.                                         |
-
-
+| Date | Change |
+| ---- | ------ |
+| 2026-09-08 | Compacted architecture doc: system shape (deployment, packages, frontend, API), linked detail diagrams, removed duplicated inline flows; Step 10 mock/review contract kept. |
+| 2026-09-08 | Step 10: sync mock processing; review DTO + file stream; retry / continue-manual / pending DELETE; empty extraction on manual-continue. |
+| 2026-07-31 | Upload MIME/size and storage path rules; initial `POST/GET /documents` contract. |
+| 2026-07-27 | Auth flows, JWT contract, stack notes. |
+| 2026-07-21 | Tech stack chosen (Spring Boot + Vite). |
+| 2026-07-17 | MVP relational model and ER diagram. |
+| 2026-07-16 | Flow A and Flow C activity diagrams. |
+| 2026-07-14 | Initial architecture draft and Flow B. |
