@@ -9,6 +9,7 @@ import { renderHomePage } from './pages/home.js';
 import { renderLoginPage } from './pages/login.js';
 import { renderRegisterPage } from './pages/register.js';
 import { renderUploadPage } from './pages/upload.js';
+import { renderReviewPage } from './pages/review.js';
 
 const app = document.getElementById('app');
 
@@ -23,6 +24,11 @@ startRouter((route) => {
   }
   if (route === '/upload') {
     renderUploadPage(app);
+    return;
+  }
+  const reviewMatch = route.match(/^\/review\/(\d+)$/);
+  if (reviewMatch) {
+    renderReviewPage(app, reviewMatch[1]);
     return;
   }
   renderHomePage(app);

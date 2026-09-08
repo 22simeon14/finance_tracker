@@ -1,8 +1,8 @@
 /**
  * Main Responsibility: Upload page — send a receipt file to POST /documents.
  *
- * Logged-in only. Checks MIME and size in the browser before upload, then
- * shows the created document metadata. Optional verify calls GET /documents/{id}.
+ * Logged-in only. Validates MIME and size in the browser, then redirects to
+ * the review page for the created document id.
  */
 import { api } from '../api.js';
 import { isLoggedIn } from '../auth.js';
@@ -33,15 +33,8 @@ export function renderUploadPage(root) {
           />
         </label>
         <p id="upload-error" class="form-error" hidden></p>
-        <button type="submit">Upload</button>
+        <button type="submit" id="upload-submit">Upload</button>
       </form>
-
-      <section id="upload-result" class="health-card" hidden>
-        <h2>Uploaded</h2>
-        <p id="upload-result-summary" class="account-status"></p>
-        <button type="button" id="verify-btn">Verify with GET /documents/{id}</button>
-        <p id="verify-status" class="categories-status"></p>
-      </section>
 
       <p class="auth-switch">
         <a href="#/">Back to home</a>
@@ -51,19 +44,11 @@ export function renderUploadPage(root) {
 
   const form = root.querySelector('#upload-form');
   const errorEl = root.querySelector('#upload-error');
-  const resultSection = root.querySelector('#upload-result');
-  const resultSummaryEl = root.querySelector('#upload-result-summary');
-  const verifyBtn = root.querySelector('#verify-btn');
-  const verifyStatusEl = root.querySelector('#verify-status');
-
-  let lastDocumentId = null;
+  const submitBtn = root.querySelector('#upload-submit');
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     errorEl.hidden = true;
-    resultSection.hidden = true;
-    verifyStatusEl.textContent = '';
-    lastDocumentId = null;
 
     const fileInput = form.querySelector('input[name="file"]');
     const file = fileInput.files?.[0];
@@ -78,47 +63,26 @@ export function renderUploadPage(root) {
     const body = new FormData();
     body.append('file', file);
 
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading...';
+
     try {
       const document = await api('/documents', {
         method: 'POST',
         body,
       });
 
-      lastDocumentId = document.id;
-      resultSummaryEl.textContent =
-        `id=${document.id}, status=${document.status}, ` +
-        `file=${document.originalFilename}, type=${document.mimeType}, ` +
-        `size=${document.fileSizeBytes} bytes`;
-      resultSection.hidden = false;
+      navigate(`/review/${document.id}`);
     } catch (error) {
-      // Token may already be cleared by api() on 401 — send user to login.
       if (error.status === 401) {
         navigate('/login');
         return;
       }
       errorEl.textContent = error.message || 'Upload failed';
       errorEl.hidden = false;
-    }
-  });
-
-  verifyBtn.addEventListener('click', async () => {
-    if (lastDocumentId == null) {
-      return;
-    }
-
-    verifyStatusEl.textContent = 'Loading...';
-
-    try {
-      const document = await api(`/documents/${lastDocumentId}`);
-      verifyStatusEl.textContent =
-        `Verified: id=${document.id}, status=${document.status}, ` +
-        `file=${document.originalFilename}`;
-    } catch (error) {
-      if (error.status === 401) {
-        navigate('/login');
-        return;
-      }
-      verifyStatusEl.textContent = error.message || 'Verify failed';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Upload';
     }
   });
 }

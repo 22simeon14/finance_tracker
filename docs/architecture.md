@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-07-31  
+> **Last updated:** 2026-09-08  
 > This document evolves together with the implementation. It records decisions that are currently accepted and separates them from open questions.
 
 ## 1. Product vision
@@ -340,18 +340,23 @@ sequenceDiagram
 
 The user uploads a document, the system processes it, the user reviews the proposed fields, and an expense is saved only after explicit approval.
 
-#### Upload contract (implemented)
+#### Upload, mock processing, and review contract (implemented — Step 10)
 
-Step 9 covers upload and metadata only. OCR, review, and expenses remain later steps; a successful upload leaves the document at `UPLOADED` and does not create `document_extractions` or `expenses` rows.
+Step 10 runs **synchronous mock processing** inside the same `POST /documents` request after the `documents` row is saved. The response returns the **post-processing** status (`REVIEW_REQUIRED` or `PROCESSING_FAILED`). Real OCR and expense approval remain later steps; happy-path upload + review still creates **no** `expenses` row and there is **no** approve endpoint yet.
 
-- `POST /documents` — protected multipart (`file` part); success `201` with document metadata.
-- `GET /documents/{id}` — protected; metadata only for the owner; missing or foreign id → `404` (same response so existence is not leaked); no file bytes.
+- `POST /documents` — protected multipart (`file` part); success `201` with review DTO (metadata + `fileUrl` + nullable `extraction`). Order: validate → write file → insert `UPLOADED` → set `PROCESSING` → mock extract → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing DB work fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over orphaning disk without a row.
+- `GET /documents/{id}` — protected review DTO for the owner: metadata + `fileUrl` (`/documents/{id}/file`) + nullable `extraction`. Does **not** expose `storage_path`. Missing or foreign id → `404`.
+- `GET /documents/{id}/file` — protected; streams stored bytes for the owner (`Content-Type` from `mime_type`, inline disposition). Missing, foreign, or missing disk file → `404`.
+- `DELETE /documents/{id}` — protected hard delete of a pending document (cascades `document_extractions`) and the disk file. Allowed only when status is not `SAVED` (`SAVED` → `409`). Missing or foreign → `404`.
+- `POST /documents/{id}/process` — protected retry; only from `UPLOADED` or `PROCESSING_FAILED` (else `409`); wrong owner → `404`. Re-runs mock processing and overwrites the single extraction row if present.
+- `POST /documents/{id}/continue-manual` — protected; only from `PROCESSING_FAILED` (else `409`). Ensures an **empty** `document_extractions` row (all proposed fields null) and sets status `REVIEW_REQUIRED`.
+- Simulated failure (local testing): if `original_filename` contains `fail` (case-insensitive) → `PROCESSING_FAILED` and no usable extraction.
 - Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`.
 - Maximum file size: 5 MB (`5242880` bytes). Enforced in the app and by Spring multipart limits (`spring.servlet.multipart.max-file-size` / `max-request-size`).
 - Storage path pattern: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` — the client filename is never used for the path on disk.
-- `documents.storage_path` stays server-side; API responses expose `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt` only.
+- `documents.storage_path` stays server-side; review responses expose `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt`, `fileUrl`, and nullable `extraction` only.
 - Owner comes from the JWT (`CurrentUser`), never from a body field.
-- Order: validate → write file → insert DB; if the DB insert fails after a disk write, delete the orphan file.
+- Frontend review route: `#/review/:id` — loads review DTO + categories, previews the file via authenticated fetch → blob URL, editable form fields (no Approve yet).
 
 ### Flow C — Expense exploration
 
@@ -561,9 +566,9 @@ The system continues with the available text. Extracted fields may be incomplete
 
 The document is marked `PROCESSING_FAILED`. The user can:
 
-- retry processing;
-- continue with an empty manual form;
-- delete the uploaded document.
+- retry processing (`POST /documents/{id}/process`);
+- continue with an empty manual form (`POST /documents/{id}/continue-manual`) — the backend creates or clears a `document_extractions` row with all proposed fields null, then sets `REVIEW_REQUIRED`;
+- delete the uploaded document (`DELETE /documents/{id}`).
 
 A failed AI operation must not permanently block manual expense creation.
 
@@ -1088,22 +1093,23 @@ Flow B is complete when a user can:
 These questions remain open until the relevant implementation phase:
 
 - Whether PDF support includes only digital PDFs or also scanned PDFs.
-- Whether processing is synchronous or performed by a background job.
-- Which OCR engine or service is used.
-- Which AI extraction approach is used.
+- Which OCR engine or service is used (Step 10 uses a deterministic mock only; no OCR libraries).
+- Which AI extraction approach is used after the mock is replaced.
 - Whether raw OCR text is retained long-term and for how long.
 - Retry limits and timeout behaviour.
 - Exact seeded category `name` / `slug` pairs (a provisional seed exists in `db/migrations/002_seed_categories.sql` and may be refined).
-- Whether an empty `document_extractions` row is created on manual-continue-after-failure, or review treats a missing extraction as an empty form.
 - Whether field-level confidence scores are introduced after the MVP.
 
-Resolved for MVP upload limits (Step 9):
+Resolved for MVP upload limits (Step 9) and mock processing / review (Step 10):
 
 - Allowed MIME types: `image/jpeg`, `image/png`, `application/pdf`.
 - Maximum upload size: 5 MB (`5242880` bytes), also configured as Spring multipart max file/request size.
 - On-disk layout: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` (extension derived from allowed MIME; client filename is not trusted for the path).
-- Create status: `UPLOADED` only; no automatic advance to `PROCESSING` until the processing step is implemented.
-- `GET /documents/{id}` returns owner-scoped metadata only (no file streaming, no extraction payload).
+- Processing runs **synchronously** inside `POST /documents` after the `UPLOADED` row is saved; the create response already carries the post-processing status.
+- Mock success writes a partial `document_extractions` row and sets `REVIEW_REQUIRED`; filename containing `fail` (case-insensitive) sets `PROCESSING_FAILED`.
+- Manual continue after failure creates/clears an **empty** `document_extractions` row (all proposed fields null) and sets `REVIEW_REQUIRED`.
+- `GET /documents/{id}` returns the owner-scoped review DTO (metadata + `fileUrl` + nullable `extraction`); file bytes are served separately at `GET /documents/{id}/file`.
+- Pending hard delete via `DELETE /documents/{id}` (not `SAVED`); no approve / expense creation in Step 10.
 
 Resolved for MVP database design:
 
@@ -1144,6 +1150,7 @@ The following principles are accepted for the project:
 
 | Date       | Change                                                                                                                             |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-08 | Step 10: sync mock processing on upload; review DTO + `GET /documents/{id}/file`; retry / continue-manual / pending DELETE; empty extraction on manual-continue; approve/expenses still deferred. |
 | 2026-07-31 | Resolved upload MIME/size limits and storage path rules; documented `POST /documents` and `GET /documents/{id}` upload contract (status `UPLOADED` only; no extraction/expense on create). |
 | 2026-07-27 | Replaced Flow A with separate register/login diagrams (START + phased subgraphs, no backward error arrows), documented JWT authentication contract and protected-request sequence; updated stack notes and README for implemented auth. |
 | 2026-07-17 | Defined MVP relational model (users, documents, document_extractions, categories, expenses), ER diagram, and application DB rules. |

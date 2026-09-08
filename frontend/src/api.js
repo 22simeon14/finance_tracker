@@ -46,3 +46,35 @@ export async function api(path, options = {}) {
 
   return data;
 }
+
+/**
+ * Authenticated GET that returns raw bytes (e.g. document file stream).
+ * Does not parse JSON. On 401 clears token like api().
+ */
+export async function apiBlob(path) {
+  const headers = {};
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(path, { headers });
+
+  if (response.status === 401) {
+    clearToken();
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await response.json();
+      message = data?.error || message;
+    }
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.blob();
+}
