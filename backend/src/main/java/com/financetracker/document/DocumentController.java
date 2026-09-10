@@ -1,6 +1,10 @@
 package com.financetracker.document;
 
+import com.financetracker.expense.ApproveDocumentRequest;
+import com.financetracker.expense.ExpenseResponse;
+import com.financetracker.expense.ExpenseService;
 import com.financetracker.security.CurrentUser;
+import jakarta.validation.Valid;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
@@ -12,6 +16,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,20 +25,27 @@ import org.springframework.web.multipart.MultipartFile;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Main Responsibility: Expose authenticated document upload, processing, review, file, and delete APIs.
+ * Main Responsibility: Expose authenticated document upload, processing, review, approve, file, and delete APIs.
  *
  * The current user always comes from JWT auth, never from request input, so each request
- * is safely scoped to its owner. Processing and ownership rules live in DocumentService.
+ * is safely scoped to its owner. Processing and ownership rules live in DocumentService;
+ * approve (expense + SAVED) is delegated to ExpenseService.
  */
 @RestController
 @RequestMapping("/documents")
 public class DocumentController {
 
     private final DocumentService documentService;
+    private final ExpenseService expenseService;
     private final CurrentUser currentUser;
 
-    public DocumentController(DocumentService documentService, CurrentUser currentUser) {
+    public DocumentController(
+            DocumentService documentService,
+            ExpenseService expenseService,
+            CurrentUser currentUser
+    ) {
         this.documentService = documentService;
+        this.expenseService = expenseService;
         this.currentUser = currentUser;
     }
 
@@ -56,6 +68,19 @@ public class DocumentController {
     @PostMapping("/{id}/continue-manual")
     public DocumentReviewResponse continueManual(@PathVariable Long id) {
         return documentService.continueManual(currentUser.getUserId(), id);
+    }
+
+    /**
+     * Confirm review fields into an expense and set status SAVED (one DB transaction).
+     * Only REVIEW_REQUIRED → else 409; missing/foreign → 404; validation/category → 400.
+     */
+    @PostMapping("/{id}/approve")
+    public ResponseEntity<ExpenseResponse> approve(
+            @PathVariable Long id,
+            @Valid @RequestBody ApproveDocumentRequest request
+    ) {
+        ExpenseResponse response = expenseService.approve(currentUser.getUserId(), id, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**
