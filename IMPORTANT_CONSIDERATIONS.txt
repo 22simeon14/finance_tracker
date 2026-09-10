@@ -1,22 +1,29 @@
-1. Работата отвъд MVP трябва да се случва на отделен branch
-2. MVP включва обработка на касови бонове, евентуално pdf позволява банкови извлечения,
-но последното трябва да се провери, както и да се отразяват плащания с карта, за които нямаме
-касов бон
-3. Важно е да се покрият и разходите, които не отчитаме - харч без касов бон (поради някаква 
-причина), дискотека, бакшиши, даване на заем и тн. Всеки тип харч трябва да може 
-да бъде записан под някаква форма.
-4. Потребителят трябва да има опция да създаде expense който няма как да бъде подкрепен от документ 
-например бакшиш, или при загубен/непредоставен касов бон при кеш плащане, или пък след дискотека, 
-дори дето се вика загуба на пари случайно паднали от джоба. Подходът трябва да се обмисли, тъй като в момента
-extraction запис в DB се създава само след потвърждение от потребителя, а самата таблица обвързва запис с 
-document запис, посредством user_id. А както казах - при такива случаи нямаме документи. Трябва да се помисли за
-вариантите - null на това поле за тези expenses, или пък нова таблица, нов UI (нов page), нов обект или частен 
-случай на съществуващ тип обект и тн
-5. ВСИЧКИ разходи на потребителя ТРЯБВА да бъдат отразени - не ни стигат 50% процента или повече,
-защото смисълът се губи. Поне 98% процента. Естествено, потребителят може и да не въведе харч
-поради някаква причина, но възможността трябва да я има - а разбира се, най добре е да се случва независимо какво ...
-6. Много полезно би било в бъдеще AI да има достъп до медиани, средни стойности, статистики, и да направлява харчовете, 
-например съобщение "you are spending 10 percent more money in the last 7 days for food, compared to last month, consider ....."
-7. всеки ред описващ купен продукт трябва да има собствена категория - за перфектен детайлен анализ ма харченето (ТРЯБВА ОБМИСЛЯНЕ)
-8. в далечно бъдеще - въпроси тип "като ми гледаш баланса харчовете и време до заплата, да си купя ли ... за ... евро ? "
-Също персонална информация - кредити, абонаменти, абе "задължителни плащания" за по добър анализ и съветване на потребителя.
+# Main Responsibility: Product notes beyond the current MVP scope.
+#
+# Capture future requirements and design questions so post-MVP work
+# stays intentional and happens on a separate branch.
+
+1. Work beyond the MVP must happen on a separate branch.
+2. MVP covers cash-receipt processing; PDF bank statements may be possible later
+   but that must be verified. Card payments without a cash receipt also need a path.
+3. Untracked spending must be coverable somehow — spending without a receipt,
+   nightlife, tips, lending money, and similar. Every kind of spend should be
+   recordable in some form.
+4. The user must be able to create an expense that cannot be backed by a document
+   (tip, lost/missing cash receipt, nightlife, cash lost from a pocket, etc.).
+   The approach needs design thought: today an expense is tied to a document
+   (document_id NOT NULL / unique), and extractions are document-scoped. Options
+   include nullable document_id, a separate table, a new UI page, a new object,
+   or a special case of an existing type.
+5. Essentially all of a user's spending must be capturable — ~50% coverage
+   loses the product's meaning. Target at least ~98%. The user may still skip
+   an entry, but the product must allow recording it; ideally capture becomes
+   as automatic as possible later.
+6. Later, AI access to medians, averages, and stats could guide spending, e.g.
+   "you are spending 10 percent more money in the last 7 days for food,
+   compared to last month, consider ....."
+7. Each purchased line item may need its own category for detailed spend analysis
+   (needs further design).
+8. Far future: advice questions such as whether to buy something given balance,
+   recent spending, and time until payday; also personal fixed obligations
+   (loans, subscriptions, mandatory payments) for better analysis and guidance.
