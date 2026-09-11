@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-09-08  
+> **Last updated:** 2026-09-11  
 > This document records accepted decisions and how the system is built. Detail diagrams live under [`diagrams/`](diagrams/).
 
 ## Contents
@@ -150,6 +150,7 @@ flowchart TB
     subgraph services ["Application services"]
         AuthS[AuthService]
         DocS[DocumentService]
+        ExpS[ExpenseService]
         Mock[MockExtractionService]
         Files[FileStorageService]
     end
@@ -158,6 +159,7 @@ flowchart TB
         UserR[UserRepository]
         DocR[DocumentRepository]
         ExtR[DocumentExtractionRepository]
+        ExpR[ExpenseRepository]
         CatR[CategoryRepository]
         PG[(PostgreSQL)]
     end
@@ -166,14 +168,19 @@ flowchart TB
     AuthC --> AuthS --> UserR
     DocC --> CU
     DocC --> DocS
+    DocC --> ExpS
     DocS --> Mock
     DocS --> Files
     DocS --> DocR
     DocS --> ExtR
+    ExpS --> DocR
+    ExpS --> ExpR
+    ExpS --> CatR
     CatC --> CatR
     UserR --> PG
     DocR --> PG
     ExtR --> PG
+    ExpR --> PG
     CatR --> PG
     Files --> Disk[(UPLOAD_DIR)]
 ```
@@ -183,14 +190,13 @@ flowchart TB
 | `auth` | `AuthController`, `AuthService`, request/response DTOs | Register, login, `/me` |
 | `security` | `SecurityConfig`, `JwtAuthFilter`, `JwtService`, `CurrentUser`, `UserPrincipal` | Stateless JWT API; ownership identity |
 | `user` | `User`, `UserRepository` | Account row (`email`, `password_hash`) |
-| `document` | `DocumentController`, `DocumentService`, `FileStorageService`, `MockExtractionService`, entities/DTOs | Upload, mock process, review GET, file stream, pending delete |
+| `document` | `DocumentController`, `DocumentService`, `FileStorageService`, `MockExtractionService`, entities/DTOs | Upload, mock process, review GET, file stream, pending delete; thin approve HTTP entry |
+| `expense` | `ExpenseService`, `Expense`, `ExpenseRepository`, approve request/response DTOs | Atomic approve: insert `expenses` + set document `SAVED` |
 | `category` | `CategoryController`, entity/repo | List active categories |
 | `health` | `HealthController` | Liveness + DB check |
 | `config` | `WebConfig` | MVC CORS for the Vite origin |
 
-There is no `expense` package yet. The `expenses` table exists in SQL for the approve step.
-
-**Typical collaboration (protected document call):** browser → `JwtAuthFilter` → controller → `CurrentUser` → `DocumentService` → repositories / `FileStorageService` → JSON or file bytes.
+**Typical collaboration (protected document call):** browser → `JwtAuthFilter` → controller → `CurrentUser` → `DocumentService` / `ExpenseService` → repositories / `FileStorageService` → JSON or file bytes.
 
 ### 4.4 Frontend structure
 
@@ -203,7 +209,7 @@ There is no `expense` package yet. The `expenses` table exists in SQL for the ap
 | `pages/home.js` | Account, categories sample, health |
 | `pages/login.js` / `register.js` | Auth forms |
 | `pages/upload.js` | Multipart upload → navigate to review |
-| `pages/review.js` | Preview + editable proposed fields; retry / continue-manual / delete |
+| `pages/review.js` | Preview + editable proposed fields; Approve (→ home) / retry / continue-manual / delete |
 | `vite.config.js` | Dev server `:5173` + API proxy |
 
 | Hash route | Page |
@@ -230,9 +236,12 @@ Unknown hashes fall through to home.
 | `GET` | `/documents/{id}/file` | JWT | File bytes (inline) |
 | `POST` | `/documents/{id}/process` | JWT | Review DTO (retry mock) |
 | `POST` | `/documents/{id}/continue-manual` | JWT | Review DTO (empty extraction) |
+| `POST` | `/documents/{id}/approve` | JWT | `201` `ExpenseResponse` (atomic expense + `SAVED`) |
 | `DELETE` | `/documents/{id}` | JWT | `204` (pending only; `SAVED` → `409`) |
 
 Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt`, `fileUrl`, nullable `extraction` (`rawOcrText`, proposed merchant/date/amount/currency/categoryId). Never exposes `storage_path`.
+
+**Approve** (`POST /documents/{id}/approve`): body = confirmed form fields (`expenseDate`, `totalAmount`, `currency`, `categoryId`, optional `merchant`). Only from `REVIEW_REQUIRED` (`409` otherwise; second approve included). Missing/foreign document → `404`. Invalid amount/currency/category → `400`. One `@Transactional` insert into `expenses` + `documents.status = SAVED`; failure rolls back and leaves `REVIEW_REQUIRED`. Extraction row is not updated (proposals stay as history). Response: `id`, `documentId`, `categoryId`, `merchant`, `expenseDate`, `totalAmount`, `currency`, `createdAt`. UI Approve is shown only for `REVIEW_REQUIRED`; on success navigates to `#/`.
 
 ---
 
@@ -305,11 +314,13 @@ Turn an uploaded receipt/invoice into a **user-approved** expense without silent
 
 Full activity diagram (including failures and manual continue): [diagrams/document-processing-flow.mmd](diagrams/document-processing-flow.mmd) (SVG: [document-processing-flow.svg](diagrams/document-processing-flow.svg)).
 
-### 6.3 Upload, mock processing, and review (current contract)
+### 6.3 Upload, mock processing, review, and approve (current contract)
 
-Processing runs **synchronously** inside `POST /documents` after the row is saved. The `201` body already has the post-processing status. Real OCR libraries are not used yet — `MockExtractionService` fills deterministic sample fields (merchant `Demo Cafe`, amount `12.50`, `EUR`, today’s date; category left null on purpose). Approve / `expenses` insert is not exposed yet.
+Processing runs **synchronously** inside `POST /documents` after the row is saved. The `201` body already has the post-processing status. Real OCR libraries are not used yet — `MockExtractionService` fills deterministic sample fields (merchant `Demo Cafe`, amount `12.50`, `EUR`, today’s date; category left null on purpose).
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → mock extract → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
+
+**Approve** (`POST /documents/{id}/approve`, JWT): `DocumentController` delegates to `ExpenseService.approve`. Body carries confirmed fields (not a re-read of extraction). Only `REVIEW_REQUIRED` is allowed. In one DB transaction the service inserts `expenses` and sets `documents.status = SAVED`. Any failure rolls back — no orphan expense and status stays `REVIEW_REQUIRED`. `document_extractions` is left unchanged. Unique `expenses.document_id` is a safety net against double approve. Frontend shows Approve only when status is `REVIEW_REQUIRED`; success navigates to `#/` (expense list UI is a later step).
 
 **Rules:**
 
@@ -318,6 +329,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 - Filename containing `fail` (case-insensitive) → `PROCESSING_FAILED`, no usable extraction.
 - `POST …/process` — retry from `UPLOADED` or `PROCESSING_FAILED` only (`409` otherwise).
 - `POST …/continue-manual` — from `PROCESSING_FAILED` only; empty extraction row + `REVIEW_REQUIRED`.
+- `POST …/approve` — from `REVIEW_REQUIRED` only; atomic expense insert + `SAVED` (`409` if wrong status; `400` if validation/category fails).
 - `DELETE` — hard-delete pending document (cascade extraction) + disk file; not allowed for `SAVED` (`409`).
 - Frontend `#/review/:id` loads review DTO + categories and previews via authenticated blob URL.
 
@@ -484,6 +496,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-11 | Step 11: `POST /documents/{id}/approve` — atomic `expenses` insert + `SAVED`; `expense` package + review Approve UI; extraction left as history. |
 | 2026-09-08 | Compacted architecture doc: system shape (deployment, packages, frontend, API), linked detail diagrams, removed duplicated inline flows; Step 10 mock/review contract kept. |
 | 2026-09-08 | Step 10: sync mock processing; review DTO + file stream; retry / continue-manual / pending DELETE; empty extraction on manual-continue. |
 | 2026-07-31 | Upload MIME/size and storage path rules; initial `POST/GET /documents` contract. |
