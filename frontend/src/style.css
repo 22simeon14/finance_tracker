@@ -200,3 +200,94 @@ button {
   border-radius: 4px;
 }
 
+.expenses-list {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.expense-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.expense-row:hover {
+  border-color: #999;
+}
+
+.expense-row__date,
+.expense-row__category {
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.expense-row__merchant {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expense-row__amount {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.expenses-empty {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  color: #555;
+}
+
+.expense-detail-fields {
+  padding: 1.25rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.expense-detail-fields h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.expense-dl {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
+.expense-dl dt {
+  color: #555;
+  font-weight: 600;
+}
+
+.expense-dl dd {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .expense-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .expense-row__merchant {
+    grid-column: 1 / -1;
+  }
+}
+

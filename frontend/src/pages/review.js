@@ -3,7 +3,7 @@
  *
  * Loads GET /documents/{id} and GET /categories. File preview uses authenticated
  * blob fetch (img/iframe cannot send Bearer). Actions: approve (REVIEW_REQUIRED
- * only → home), delete pending, retry processing, continue manually after failure.
+ * only → expenses list), delete pending, retry processing, continue manually after failure.
  */
 import { api, apiBlob } from '../api.js';
 import { isLoggedIn } from '../auth.js';
@@ -242,7 +242,7 @@ export function renderReviewPage(root, documentId) {
           merchant: merchant || null,
         }),
       });
-      navigate('/');
+      navigate('/expenses');
     } catch (error) {
       if (error.status === 401) {
         navigate('/login');
