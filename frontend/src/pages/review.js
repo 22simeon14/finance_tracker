@@ -2,8 +2,8 @@
  * Main Responsibility: Document review page — preview uploaded file and edit proposed fields.
  *
  * Loads GET /documents/{id} and GET /categories. File preview uses authenticated
- * blob fetch (img/iframe cannot send Bearer). Actions: delete pending, retry
- * processing, continue manually after failure. No approve/save in this step.
+ * blob fetch (img/iframe cannot send Bearer). Actions: approve (REVIEW_REQUIRED
+ * only → home), delete pending, retry processing, continue manually after failure.
  */
 import { api, apiBlob } from '../api.js';
 import { isLoggedIn } from '../auth.js';
@@ -73,6 +73,7 @@ export function renderReviewPage(root, documentId) {
           </div>
 
           <div class="review-actions">
+            <button type="button" id="approve-btn" hidden>Approve</button>
             <button type="button" id="delete-btn" class="button-danger">Delete pending document</button>
           </div>
           <p id="review-action-status" class="categories-status"></p>
@@ -98,6 +99,7 @@ export function renderReviewPage(root, documentId) {
   const failedActionsEl = root.querySelector('#review-failed-actions');
   const retryBtn = root.querySelector('#retry-btn');
   const continueManualBtn = root.querySelector('#continue-manual-btn');
+  const approveBtn = root.querySelector('#approve-btn');
   const deleteBtn = root.querySelector('#delete-btn');
   const actionStatusEl = root.querySelector('#review-action-status');
 
@@ -105,6 +107,7 @@ export function renderReviewPage(root, documentId) {
 
   retryBtn.addEventListener('click', () => runAction('retry'));
   continueManualBtn.addEventListener('click', () => runAction('continue-manual'));
+  approveBtn.addEventListener('click', () => runApprove());
   deleteBtn.addEventListener('click', () => runAction('delete'));
 
   loadPage();
@@ -162,15 +165,18 @@ export function renderReviewPage(root, documentId) {
       extraction?.proposedCategoryId != null ? String(extraction.proposedCategoryId) : '';
 
     const isFailed = document.status === 'PROCESSING_FAILED';
+    const canApprove = document.status === 'REVIEW_REQUIRED';
     failedActionsEl.hidden = !isFailed;
+    // Approve only when the document is ready for review (hidden for PROCESSING_FAILED / SAVED).
+    approveBtn.hidden = !canApprove;
 
     if (isFailed) {
       formNoteEl.textContent =
         'Processing failed. Retry to run extraction again, or continue manually to fill the form yourself.';
       formNoteEl.hidden = false;
-    } else if (document.status === 'REVIEW_REQUIRED') {
+    } else if (canApprove) {
       formNoteEl.textContent =
-        'Review and edit the proposed fields. Saving as an expense is not available yet.';
+        'Review and edit the proposed fields, then Approve to save as an expense.';
       formNoteEl.hidden = false;
     } else {
       formNoteEl.hidden = true;
@@ -192,6 +198,60 @@ export function renderReviewPage(root, documentId) {
       }
       previewContainerEl.innerHTML =
         `<p class="preview-placeholder preview-placeholder--error">${error.message || 'Preview unavailable'}</p>`;
+    }
+  }
+
+  /**
+   * POST confirmed form fields to approve. Client checks required fields first;
+   * backend remains the authority for validation and status rules.
+   */
+  async function runApprove() {
+    errorEl.hidden = true;
+    actionStatusEl.textContent = '';
+
+    const merchant = formEl.querySelector('[name="merchant"]').value.trim();
+    const expenseDate = formEl.querySelector('[name="date"]').value;
+    const amountRaw = formEl.querySelector('[name="amount"]').value;
+    const currency = formEl.querySelector('[name="currency"]').value;
+    const categoryIdRaw = formEl.querySelector('[name="categoryId"]').value;
+
+    if (!expenseDate || !amountRaw || !categoryIdRaw) {
+      errorEl.textContent = 'Date, amount, and category are required before approve.';
+      errorEl.hidden = false;
+      return;
+    }
+
+    const totalAmount = Number(amountRaw);
+    if (!(totalAmount > 0)) {
+      errorEl.textContent = 'Amount must be greater than zero.';
+      errorEl.hidden = false;
+      return;
+    }
+
+    actionStatusEl.textContent = 'Approving...';
+    approveBtn.disabled = true;
+
+    try {
+      await api(`/documents/${documentId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({
+          expenseDate,
+          totalAmount,
+          currency,
+          categoryId: Number(categoryIdRaw),
+          merchant: merchant || null,
+        }),
+      });
+      navigate('/');
+    } catch (error) {
+      if (error.status === 401) {
+        navigate('/login');
+        return;
+      }
+      actionStatusEl.textContent = '';
+      errorEl.textContent = error.message || 'Approve failed';
+      errorEl.hidden = false;
+      approveBtn.disabled = false;
     }
   }
 
