@@ -105,7 +105,7 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 ```mermaid
 flowchart LR
     Browser["Browser<br/>localhost:5173"]
-    Vite["Vite dev server<br/>proxy /auth /documents …"]
+    Vite["Vite dev server<br/>proxy /auth /documents /expenses …"]
     API["Spring Boot<br/>localhost:8080"]
     PG["PostgreSQL<br/>localhost:5432"]
     Disk["Upload volume<br/>UPLOAD_DIR"]
@@ -137,6 +137,7 @@ flowchart TB
     subgraph api ["HTTP boundary"]
         AuthC[auth.AuthController]
         DocC[document.DocumentController]
+        ExpC[expense.ExpenseController]
         CatC[category.CategoryController]
         HealthC[health.HealthController]
     end
@@ -169,6 +170,8 @@ flowchart TB
     DocC --> CU
     DocC --> DocS
     DocC --> ExpS
+    ExpC --> CU
+    ExpC --> ExpS
     DocS --> Mock
     DocS --> Files
     DocS --> DocR
@@ -191,12 +194,12 @@ flowchart TB
 | `security` | `SecurityConfig`, `JwtAuthFilter`, `JwtService`, `CurrentUser`, `UserPrincipal` | Stateless JWT API; ownership identity |
 | `user` | `User`, `UserRepository` | Account row (`email`, `password_hash`) |
 | `document` | `DocumentController`, `DocumentService`, `FileStorageService`, `MockExtractionService`, entities/DTOs | Upload, mock process, review GET, file stream, pending delete; thin approve HTTP entry |
-| `expense` | `ExpenseService`, `Expense`, `ExpenseRepository`, approve request/response DTOs | Atomic approve: insert `expenses` + set document `SAVED` |
+| `expense` | `ExpenseController`, `ExpenseService`, `Expense`, `ExpenseRepository`, approve + read DTOs | Atomic approve; owner-scoped list/detail reads |
 | `category` | `CategoryController`, entity/repo | List active categories |
 | `health` | `HealthController` | Liveness + DB check |
 | `config` | `WebConfig` | MVC CORS for the Vite origin |
 
-**Typical collaboration (protected document call):** browser → `JwtAuthFilter` → controller → `CurrentUser` → `DocumentService` / `ExpenseService` → repositories / `FileStorageService` → JSON or file bytes.
+**Typical collaboration (protected document/expense call):** browser → `JwtAuthFilter` → controller → `CurrentUser` → `DocumentService` / `ExpenseService` → repositories / `FileStorageService` → JSON or file bytes.
 
 ### 4.4 Frontend structure
 
@@ -206,11 +209,13 @@ flowchart TB
 | `router.js` | Hash router (`#/…`) |
 | `api.js` | `api()` (JSON + Bearer); `apiBlob()` for file preview |
 | `auth.js` | JWT in `localStorage` (`ft_token`); login helpers |
-| `pages/home.js` | Account, categories sample, health |
+| `pages/home.js` | Account, categories sample, health; logged-in link to Expenses |
 | `pages/login.js` / `register.js` | Auth forms |
 | `pages/upload.js` | Multipart upload → navigate to review |
-| `pages/review.js` | Preview + editable proposed fields; Approve (→ home) / retry / continue-manual / delete |
-| `vite.config.js` | Dev server `:5173` + API proxy |
+| `pages/review.js` | Preview + editable proposed fields; Approve (→ expenses list) / retry / continue-manual / delete |
+| `pages/expenses.js` | Owner expense list (`GET /expenses`); empty state + link to upload |
+| `pages/expense-detail.js` | One expense (`GET /expenses/{id}`) + document preview/link; no edit/delete |
+| `vite.config.js` | Dev server `:5173` + API proxy (`/auth`, `/documents`, `/expenses`, …) |
 
 | Hash route | Page |
 | ---------- | ---- |
@@ -219,6 +224,8 @@ flowchart TB
 | `#/register` | Register |
 | `#/upload` | Upload (logged-in) |
 | `#/review/:id` | Review (logged-in) |
+| `#/expenses` | Expense list (logged-in) |
+| `#/expenses/:id` | Expense details (logged-in) |
 
 Unknown hashes fall through to home.
 
@@ -238,10 +245,14 @@ Unknown hashes fall through to home.
 | `POST` | `/documents/{id}/continue-manual` | JWT | Review DTO (empty extraction) |
 | `POST` | `/documents/{id}/approve` | JWT | `201` `ExpenseResponse` (atomic expense + `SAVED`) |
 | `DELETE` | `/documents/{id}` | JWT | `204` (pending only; `SAVED` → `409`) |
+| `GET` | `/expenses` | JWT | `200` `ExpenseViewResponse[]` (owner only; `expense_date DESC`, then `id DESC`) |
+| `GET` | `/expenses/{id}` | JWT | `200` `ExpenseViewResponse` (missing/foreign → `404`) |
 
-Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt`, `fileUrl`, nullable `extraction` (`rawOcrText`, proposed merchant/date/amount/currency/categoryId). Never exposes `storage_path`.
+Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt`, `fileUrl`, nullable `extraction` (`rawOcrText`, proposed merchant/date/amount/currency/categoryId`). Never exposes `storage_path`.
 
-**Approve** (`POST /documents/{id}/approve`): body = confirmed form fields (`expenseDate`, `totalAmount`, `currency`, `categoryId`, optional `merchant`). Only from `REVIEW_REQUIRED` (`409` otherwise; second approve included). Missing/foreign document → `404`. Invalid amount/currency/category → `400`. One `@Transactional` insert into `expenses` + `documents.status = SAVED`; failure rolls back and leaves `REVIEW_REQUIRED`. Extraction row is not updated (proposals stay as history). Response: `id`, `documentId`, `categoryId`, `merchant`, `expenseDate`, `totalAmount`, `currency`, `createdAt`. UI Approve is shown only for `REVIEW_REQUIRED`; on success navigates to `#/`.
+**Approve** (`POST /documents/{id}/approve`): body = confirmed form fields (`expenseDate`, `totalAmount`, `currency`, `categoryId`, optional `merchant`). Only from `REVIEW_REQUIRED` (`409` otherwise; second approve included). Missing/foreign document → `404`. Invalid amount/currency/category → `400`. One `@Transactional` insert into `expenses` + `documents.status = SAVED`; failure rolls back and leaves `REVIEW_REQUIRED`. Extraction row is not updated (proposals stay as history). Response: `id`, `documentId`, `categoryId`, `merchant`, `expenseDate`, `totalAmount`, `currency`, `createdAt`. UI Approve is shown only for `REVIEW_REQUIRED`; on success navigates to `#/expenses`.
+
+**Expense read** (`GET /expenses`, `GET /expenses/{id}`): ownership via join `expenses.document_id → documents` and `documents.user_id = currentUser` (same 404 policy as documents). `ExpenseViewResponse` = approve fields **plus** `categoryName`, `documentFileUrl` (`/documents/{documentId}/file`), `originalFilename`. Approve’s `ExpenseResponse` shape is unchanged. Filters, edit, delete, and dashboard remain later steps.
 
 ---
 
@@ -320,7 +331,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → mock extract → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 
-**Approve** (`POST /documents/{id}/approve`, JWT): `DocumentController` delegates to `ExpenseService.approve`. Body carries confirmed fields (not a re-read of extraction). Only `REVIEW_REQUIRED` is allowed. In one DB transaction the service inserts `expenses` and sets `documents.status = SAVED`. Any failure rolls back — no orphan expense and status stays `REVIEW_REQUIRED`. `document_extractions` is left unchanged. Unique `expenses.document_id` is a safety net against double approve. Frontend shows Approve only when status is `REVIEW_REQUIRED`; success navigates to `#/` (expense list UI is a later step).
+**Approve** (`POST /documents/{id}/approve`, JWT): `DocumentController` delegates to `ExpenseService.approve`. Body carries confirmed fields (not a re-read of extraction). Only `REVIEW_REQUIRED` is allowed. In one DB transaction the service inserts `expenses` and sets `documents.status = SAVED`. Any failure rolls back — no orphan expense and status stays `REVIEW_REQUIRED`. `document_extractions` is left unchanged. Unique `expenses.document_id` is a safety net against double approve. Frontend shows Approve only when status is `REVIEW_REQUIRED`; success navigates to `#/expenses`.
 
 **Rules:**
 
@@ -399,9 +410,42 @@ stateDiagram-v2
 
 ## 7. Flow C — Expense exploration
 
-After expenses exist, the user uses a dashboard, filtered list, details, edit, and delete. Dashboard numbers are always calculated from saved `expenses` rows (not a separate store). Deleting an expense returns its document to `REVIEW_REQUIRED`.
+After approve, the user can open a saved-expense **list** and **details**. Ownership is always enforced through `documents.user_id`. Dashboard aggregates, filters, edit, and delete are still later steps; when delete lands, removing an expense will return its document to `REVIEW_REQUIRED` and keep the file.
 
-Activity diagram: [diagrams/expense-exploration-flow.mmd](diagrams/expense-exploration-flow.mmd).
+### Current contract (Step 12)
+
+| Capability | Behaviour |
+| ---------- | --------- |
+| List | `GET /expenses` → `ExpenseViewResponse[]` ordered by `expense_date DESC`, then `id DESC` |
+| Details | `GET /expenses/{id}` → one `ExpenseViewResponse`; missing or other user’s id → `404` |
+| Auth | No token → `401` (`anyRequest().authenticated()`; no `SecurityConfig` change) |
+| UI | `#/expenses` list (empty state + upload link); `#/expenses/:id` fields + document preview via `documentFileUrl` / `apiBlob`; home “Expenses” link when logged in |
+| After approve | Review navigates to `#/expenses` so the new row is visible immediately |
+
+`ExpenseController` + `ExpenseService.list` / `getById` join expenses to documents by owner. Category name is resolved via `CategoryRepository` (still shown if the category later becomes inactive).
+
+Full product activity diagram (incl. future filters/edit/delete/dashboard): [diagrams/expense-exploration-flow.mmd](diagrams/expense-exploration-flow.mmd).
+
+```mermaid
+sequenceDiagram
+    participant UI as ExpensesPages
+    participant API as ExpenseController
+    participant Svc as ExpenseService
+    participant DB as Postgres
+
+    UI->>API: GET /expenses JWT
+    API->>Svc: list(userId)
+    Svc->>DB: expenses join documents by userId
+    Svc-->>UI: 200 ExpenseViewResponse[]
+
+    UI->>API: GET /expenses/id JWT
+    API->>Svc: getById(userId, id)
+    alt missing or foreign
+        Svc-->>UI: 404
+    else owned
+        Svc-->>UI: 200 ExpenseViewResponse
+    end
+```
 
 ---
 
@@ -496,6 +540,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-11 | Step 12: `GET /expenses`, `GET /expenses/{id}` (`ExpenseViewResponse`); list/details UI; approve navigates to `#/expenses`; Flow C current contract. |
 | 2026-09-11 | Step 11: `POST /documents/{id}/approve` — atomic `expenses` insert + `SAVED`; `expense` package + review Approve UI; extraction left as history. |
 | 2026-09-08 | Compacted architecture doc: system shape (deployment, packages, frontend, API), linked detail diagrams, removed duplicated inline flows; Step 10 mock/review contract kept. |
 | 2026-09-08 | Step 10: sync mock processing; review DTO + file stream; retry / continue-manual / pending DELETE; empty extraction on manual-continue. |
