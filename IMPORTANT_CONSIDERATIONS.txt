@@ -27,3 +27,18 @@
 8. Far future: advice questions such as whether to buy something given balance,
    recent spending, and time until payday; also personal fixed obligations
    (loans, subscriptions, mandatory payments) for better analysis and guidance.
+9. The system must ensure that no identical documents get inserted in the DB,
+   it can be denied early in UI. Two same documents must not exist because the
+   probability of wrong calculations and duplicated data rises. This may happen when
+   OCR scanning - it detects some number and checks if there is such document in DB.
+10. Pending-documents inbox (non-SAVED docs): useful after unfinished review,
+    PROCESSING_FAILED, or expense unapprove (document back to REVIEW_REQUIRED,
+    file kept). Lets the user resume approve or permanently delete the document
+    + file from that section. It does not replace re-upload — a new upload still
+    creates a new document; the inbox only surfaces work that already exists.
+    Planned as a separate sub-task alongside Flow C (not a substitute for the
+    expense list). Forever wipe from the expense screen can stay out of MVP if
+    unapprove + pending delete covers the need.
+11. Beyond expenses: income tracking (form TBD); a Saved/savings area,
+    possibly split by categories; investments as a later idea; loan/credit
+    instalments (low priority / unlikely).

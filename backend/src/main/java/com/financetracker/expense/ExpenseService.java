@@ -9,14 +9,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
- * Main Responsibility: Create expenses from review approve, and read owner-scoped lists/details.
+ * Main Responsibility: Create, read, update, and unapprove owner-scoped expenses.
  *
  * Approve inserts expenses and sets documents.status = SAVED in one transaction.
- * Extraction proposals are left unchanged (history only; money truth is expenses).
- * List/get join through documents.user_id so foreign expenses never leak (404).
+ * Edit updates confirmed fields with the same validation as approve.
+ * Unapprove hard-deletes the expense and returns the document to REVIEW_REQUIRED
+ * (file kept). Extraction proposals stay unchanged (history only).
+ * List/get/update/unapprove join through documents.user_id (foreign → 404).
  */
 @Service
 public class ExpenseService {
@@ -55,11 +58,7 @@ public class ExpenseService {
             );
         }
 
-        Category category = categoryRepository.findByIdAndIsActiveTrue(request.categoryId())
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST,
-                        "Category must exist and be active"
-                ));
+        Category category = requireActiveCategory(request.categoryId());
 
         Expense expense = new Expense();
         expense.setDocumentId(document.getId());
@@ -77,10 +76,23 @@ public class ExpenseService {
         return toResponse(savedExpense);
     }
 
-    /** Return all expenses for this user, newest expense_date first. */
+    /**
+     * Return expenses for this user, newest expense_date first.
+     * Optional from/to (inclusive), categoryId, and merchant (case-insensitive
+     * contains) are AND-combined; blank merchant is treated as no filter.
+     */
     @Transactional(readOnly = true)
-    public List<ExpenseViewResponse> list(Long userId) {
-        return expenseRepository.findAllByUserIdOrderByExpenseDateDescIdDesc(userId).stream()
+    public List<ExpenseViewResponse> list(
+            Long userId,
+            LocalDate from,
+            LocalDate to,
+            Long categoryId,
+            String merchant
+    ) {
+        String merchantFilter = normalizeMerchant(merchant);
+        return expenseRepository
+                .findAllByUserIdFiltered(userId, from, to, categoryId, merchantFilter)
+                .stream()
                 .map(expense -> toViewResponse(userId, expense))
                 .toList();
     }
@@ -90,9 +102,61 @@ public class ExpenseService {
      */
     @Transactional(readOnly = true)
     public ExpenseViewResponse getById(Long userId, Long expenseId) {
-        Expense expense = expenseRepository.findByIdAndUserId(expenseId, userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Expense not found"));
+        Expense expense = requireOwnedExpense(userId, expenseId);
         return toViewResponse(userId, expense);
+    }
+
+    /**
+     * Update confirmed fields on an owned expense (same rules as approve).
+     * Missing/foreign → 404; inactive/missing category → 400.
+     */
+    @Transactional
+    public ExpenseViewResponse update(Long userId, Long expenseId, ExpenseWriteRequest request) {
+        Expense expense = requireOwnedExpense(userId, expenseId);
+        Category category = requireActiveCategory(request.categoryId());
+
+        expense.setCategoryId(category.getId());
+        expense.setMerchant(normalizeMerchant(request.merchant()));
+        expense.setExpenseDate(request.expenseDate());
+        expense.setTotalAmount(request.totalAmount());
+        expense.setCurrency(request.currency());
+
+        Expense saved = expenseRepository.save(expense);
+        return toViewResponse(userId, saved);
+    }
+
+    /**
+     * Unapprove: delete the expense row and set the linked document back to
+     * REVIEW_REQUIRED. File on disk is kept. Missing/foreign → 404.
+     * One transaction so a failed status update does not leave an orphan delete.
+     */
+    @Transactional
+    public void unapprove(Long userId, Long expenseId) {
+        Expense expense = requireOwnedExpense(userId, expenseId);
+        Long documentId = expense.getDocumentId();
+
+        expenseRepository.delete(expense);
+
+        Document document = documentRepository.findByIdAndUserId(documentId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+
+        document.setStatus(STATUS_REVIEW_REQUIRED);
+        documentRepository.save(document);
+    }
+
+    /** Owner-scoped load; empty → 404 without revealing whether the id exists for others. */
+    private Expense requireOwnedExpense(Long userId, Long expenseId) {
+        return expenseRepository.findByIdAndUserId(expenseId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Expense not found"));
+    }
+
+    /** Category must exist and be active; otherwise 400 (same as approve). */
+    private Category requireActiveCategory(Long categoryId) {
+        return categoryRepository.findByIdAndIsActiveTrue(categoryId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Category must exist and be active"
+                ));
     }
 
     /** Treat blank merchant as null so the DB stores a clean optional value. */
