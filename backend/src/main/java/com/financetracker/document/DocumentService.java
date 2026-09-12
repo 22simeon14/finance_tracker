@@ -6,6 +6,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -13,8 +14,9 @@ import java.util.Set;
  * Main Responsibility: Validate uploads, run mock processing, and serve owner-scoped documents.
  *
  * Owns file rules, storage write order, status transitions (UPLOADED → PROCESSING →
- * REVIEW_REQUIRED / PROCESSING_FAILED), review GET / file stream / pending DELETE,
- * and cleanup when the DB save fails after the file is already on disk. Keeps the controller thin.
+ * REVIEW_REQUIRED / PROCESSING_FAILED), pending inbox list, review GET / file stream /
+ * pending DELETE, and cleanup when the DB save fails after the file is already on disk.
+ * Keeps the controller thin.
  */
 @Service
 public class DocumentService {
@@ -140,6 +142,16 @@ public class DocumentService {
         documentRepository.save(document);
 
         return toReviewResponse(document);
+    }
+
+    /**
+     * Pending inbox: owned documents with status ≠ SAVED, newest first.
+     * Slim rows only (no extraction). Empty list when nothing is pending.
+     */
+    public List<DocumentResponse> listPending(Long userId) {
+        return documentRepository.findPendingByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(this::toListItemResponse)
+                .toList();
     }
 
     /**
@@ -295,6 +307,17 @@ public class DocumentService {
         return originalFilename.trim();
     }
 
+    private DocumentResponse toListItemResponse(Document document) {
+        return new DocumentResponse(
+                document.getId(),
+                document.getStatus(),
+                document.getOriginalFilename(),
+                document.getMimeType(),
+                document.getCreatedAt(),
+                fileUrlFor(document.getId())
+        );
+    }
+
     private DocumentReviewResponse toReviewResponse(Document document) {
         ExtractionResponse extraction = documentExtractionRepository
                 .findByDocumentId(document.getId())
@@ -308,9 +331,14 @@ public class DocumentService {
                 document.getMimeType(),
                 document.getFileSizeBytes(),
                 document.getCreatedAt(),
-                "/documents/" + document.getId() + "/file",
+                fileUrlFor(document.getId()),
                 extraction
         );
+    }
+
+    /** Authenticated file-stream path; never the server storagePath. */
+    private static String fileUrlFor(Long documentId) {
+        return "/documents/" + documentId + "/file";
     }
 
     private ExtractionResponse toExtractionResponse(DocumentExtraction extraction) {

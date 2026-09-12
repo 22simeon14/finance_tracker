@@ -3,17 +3,17 @@ package com.financetracker.document;
 import java.time.LocalDateTime;
 
 /**
- * Main Responsibility: JSON response for document metadata (upload / get).
+ * Main Responsibility: Slim JSON row for the pending-documents inbox list.
  *
- * Exposes id, status, filename, MIME, size, and createdAt —
- * not storagePath (server-only) or userId (implied by auth).
+ * Exposes id, status, filename, MIME, createdAt, and fileUrl —
+ * not storagePath (server-only), userId (implied by auth), or extraction.
  */
 public record DocumentResponse(
         Long id,
         String status,
         String originalFilename,
         String mimeType,
-        Integer fileSizeBytes,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        String fileUrl
 ) {
 }

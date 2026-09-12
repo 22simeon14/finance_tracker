@@ -18,14 +18,18 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /**
- * Main Responsibility: Expose authenticated document upload, processing, review, approve, file, and delete APIs.
+ * Main Responsibility: Expose authenticated document upload, processing, review,
+ * pending inbox list, approve, file, and delete APIs.
  *
  * The current user always comes from JWT auth, never from request input, so each request
  * is safely scoped to its owner. Processing and ownership rules live in DocumentService;
@@ -56,6 +60,21 @@ public class DocumentController {
     public ResponseEntity<DocumentReviewResponse> upload(@RequestPart("file") MultipartFile file) {
         DocumentReviewResponse response = documentService.uploadDocument(currentUser.getUserId(), file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * Pending inbox: list owned documents that are not SAVED (newest first).
+     * Only status=pending is supported; missing or unknown status → 400.
+     */
+    @GetMapping
+    public List<DocumentResponse> list(@RequestParam(required = false) String status) {
+        if (status == null || status.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "status query parameter is required");
+        }
+        if (!"pending".equals(status)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported status filter");
+        }
+        return documentService.listPending(currentUser.getUserId());
     }
 
     /** Re-run mock processing from UPLOADED or PROCESSING_FAILED. */
