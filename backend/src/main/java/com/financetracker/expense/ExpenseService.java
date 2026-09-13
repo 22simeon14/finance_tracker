@@ -80,6 +80,8 @@ public class ExpenseService {
      * Return expenses for this user, newest expense_date first.
      * Optional from/to (inclusive), categoryId, and merchant (case-insensitive
      * contains) are AND-combined; blank merchant is treated as no filter.
+     * Unused filters pass boolean false + non-null sentinel so PostgreSQL
+     * never sees typed-null binds in optional JPQL branches.
      */
     @Transactional(readOnly = true)
     public List<ExpenseViewResponse> list(
@@ -90,8 +92,23 @@ public class ExpenseService {
             String merchant
     ) {
         String merchantFilter = normalizeMerchant(merchant);
+        boolean hasFromDate = from != null;
+        boolean hasToDate = to != null;
+        boolean hasCategoryId = categoryId != null;
+        boolean hasMerchant = merchantFilter != null;
+
         return expenseRepository
-                .findAllByUserIdFiltered(userId, from, to, categoryId, merchantFilter)
+                .findAllByUserIdFiltered(
+                        userId,
+                        hasFromDate,
+                        hasFromDate ? from : LocalDate.EPOCH,
+                        hasToDate,
+                        hasToDate ? to : LocalDate.EPOCH,
+                        hasCategoryId,
+                        hasCategoryId ? categoryId : -1L,
+                        hasMerchant,
+                        hasMerchant ? merchantFilter : ""
+                )
                 .stream()
                 .map(expense -> toViewResponse(userId, expense))
                 .toList();

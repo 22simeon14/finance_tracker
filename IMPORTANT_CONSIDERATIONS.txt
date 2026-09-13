@@ -39,6 +39,10 @@
     Planned as a separate sub-task alongside Flow C (not a substitute for the
     expense list). Forever wipe from the expense screen can stay out of MVP if
     unapprove + pending delete covers the need.
+    After unapprove: stay on / return to #/expenses (so the row disappearing is
+    visible). Show a short message that the document is in the pending inbox,
+    with a link to #/documents — do not force-redirect to the inbox. An inbox
+    badge/counter can come later.
 11. Beyond expenses: income tracking (form TBD); a Saved/savings area,
     possibly split by categories; investments as a later idea; loan/credit
     instalments (low priority / unlikely).

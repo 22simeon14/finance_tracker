@@ -26,11 +26,17 @@ public class DashboardService {
     /**
      * Return totals by currency, category, and merchant for this user.
      * Empty expense set → three empty lists (not null).
+     * Date filters use boolean flags + sentinel dates (same as expense list).
      */
     @Transactional(readOnly = true)
     public DashboardResponse getDashboard(Long userId, LocalDate from, LocalDate to) {
+        boolean hasFromDate = from != null;
+        boolean hasToDate = to != null;
+        LocalDate fromDate = hasFromDate ? from : LocalDate.EPOCH;
+        LocalDate toDate = hasToDate ? to : LocalDate.EPOCH;
+
         List<CurrencyTotalResponse> totalsByCurrency = expenseRepository
-                .sumTotalsByCurrency(userId, from, to)
+                .sumTotalsByCurrency(userId, hasFromDate, fromDate, hasToDate, toDate)
                 .stream()
                 .map(row -> new CurrencyTotalResponse(
                         (String) row[0],
@@ -39,7 +45,7 @@ public class DashboardService {
                 .toList();
 
         List<CategoryTotalResponse> byCategory = expenseRepository
-                .sumByCategory(userId, from, to)
+                .sumByCategory(userId, hasFromDate, fromDate, hasToDate, toDate)
                 .stream()
                 .map(row -> new CategoryTotalResponse(
                         toLong(row[0]),
@@ -50,7 +56,7 @@ public class DashboardService {
                 .toList();
 
         List<MerchantTotalResponse> byMerchant = expenseRepository
-                .sumByMerchant(userId, from, to)
+                .sumByMerchant(userId, hasFromDate, fromDate, hasToDate, toDate)
                 .stream()
                 .map(row -> new MerchantTotalResponse(
                         (String) row[0],

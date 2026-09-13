@@ -13,7 +13,8 @@ import java.util.Optional;
  *
  * Exists-by-document helps catch double-approve races alongside status checks.
  * List/get/dashboard join documents so only the owning user's expenses are returned.
- * Optional list filters (from/to/category/merchant) are AND-combined in JPQL.
+ * Optional filters use boolean flags (not null-checked binds) so PostgreSQL
+ * never mis-types unused date/string/long parameters.
  * Dashboard SUM queries read expenses only (never extractions).
  */
 public interface ExpenseRepository extends JpaRepository<Expense, Long> {
@@ -21,23 +22,29 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     boolean existsByDocumentId(Long documentId);
 
     /**
-     * Owner-scoped filtered list. Null filter params mean "no constraint".
+     * Owner-scoped filtered list. Boolean flags turn filters on/off;
+     * unused value params are still non-null sentinels from the service.
      * Newest expense_date first, then highest id for same-day ties.
      */
     @Query("""
             SELECT e FROM Expense e, Document d
             WHERE e.documentId = d.id AND d.userId = :userId
-              AND (:fromDate IS NULL OR e.expenseDate >= :fromDate)
-              AND (:toDate IS NULL OR e.expenseDate <= :toDate)
-              AND (:categoryId IS NULL OR e.categoryId = :categoryId)
-              AND (:merchant IS NULL OR LOWER(e.merchant) LIKE LOWER(CONCAT('%', :merchant, '%')))
+              AND (:hasFromDate = false OR e.expenseDate >= :fromDate)
+              AND (:hasToDate = false OR e.expenseDate <= :toDate)
+              AND (:hasCategoryId = false OR e.categoryId = :categoryId)
+              AND (:hasMerchant = false
+                   OR LOWER(COALESCE(e.merchant, '')) LIKE LOWER(CONCAT('%', :merchant, '%')))
             ORDER BY e.expenseDate DESC, e.id DESC
             """)
     List<Expense> findAllByUserIdFiltered(
             @Param("userId") Long userId,
+            @Param("hasFromDate") boolean hasFromDate,
             @Param("fromDate") LocalDate fromDate,
+            @Param("hasToDate") boolean hasToDate,
             @Param("toDate") LocalDate toDate,
+            @Param("hasCategoryId") boolean hasCategoryId,
             @Param("categoryId") Long categoryId,
+            @Param("hasMerchant") boolean hasMerchant,
             @Param("merchant") String merchant
     );
 
@@ -54,20 +61,22 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     /**
      * Sum amounts grouped by currency for the dashboard.
      * Rows are Object[]: [currency String, totalAmount Number].
-     * Optional from/to are inclusive on expense_date (same as list filters).
+     * Optional from/to use the same boolean-flag pattern as the list query.
      */
     @Query("""
             SELECT e.currency, SUM(e.totalAmount)
             FROM Expense e, Document d
             WHERE e.documentId = d.id AND d.userId = :userId
-              AND (:fromDate IS NULL OR e.expenseDate >= :fromDate)
-              AND (:toDate IS NULL OR e.expenseDate <= :toDate)
+              AND (:hasFromDate = false OR e.expenseDate >= :fromDate)
+              AND (:hasToDate = false OR e.expenseDate <= :toDate)
             GROUP BY e.currency
             ORDER BY e.currency ASC
             """)
     List<Object[]> sumTotalsByCurrency(
             @Param("userId") Long userId,
+            @Param("hasFromDate") boolean hasFromDate,
             @Param("fromDate") LocalDate fromDate,
+            @Param("hasToDate") boolean hasToDate,
             @Param("toDate") LocalDate toDate
     );
 
@@ -82,14 +91,16 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
             FROM Expense e, Document d, Category c
             WHERE e.documentId = d.id AND d.userId = :userId
               AND e.categoryId = c.id
-              AND (:fromDate IS NULL OR e.expenseDate >= :fromDate)
-              AND (:toDate IS NULL OR e.expenseDate <= :toDate)
+              AND (:hasFromDate = false OR e.expenseDate >= :fromDate)
+              AND (:hasToDate = false OR e.expenseDate <= :toDate)
             GROUP BY e.categoryId, c.name, e.currency
             ORDER BY SUM(e.totalAmount) DESC, c.name ASC, e.currency ASC
             """)
     List<Object[]> sumByCategory(
             @Param("userId") Long userId,
+            @Param("hasFromDate") boolean hasFromDate,
             @Param("fromDate") LocalDate fromDate,
+            @Param("hasToDate") boolean hasToDate,
             @Param("toDate") LocalDate toDate
     );
 
@@ -107,8 +118,8 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
                    SUM(e.totalAmount)
             FROM Expense e, Document d
             WHERE e.documentId = d.id AND d.userId = :userId
-              AND (:fromDate IS NULL OR e.expenseDate >= :fromDate)
-              AND (:toDate IS NULL OR e.expenseDate <= :toDate)
+              AND (:hasFromDate = false OR e.expenseDate >= :fromDate)
+              AND (:hasToDate = false OR e.expenseDate <= :toDate)
             GROUP BY CASE
                        WHEN e.merchant IS NULL OR TRIM(e.merchant) = '' THEN '(none)'
                        ELSE e.merchant
@@ -123,7 +134,9 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
             """)
     List<Object[]> sumByMerchant(
             @Param("userId") Long userId,
+            @Param("hasFromDate") boolean hasFromDate,
             @Param("fromDate") LocalDate fromDate,
+            @Param("hasToDate") boolean hasToDate,
             @Param("toDate") LocalDate toDate
     );
 }
