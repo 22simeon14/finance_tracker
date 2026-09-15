@@ -253,6 +253,47 @@ button {
   color: #555;
 }
 
+.expenses-notice {
+  margin: 1rem 0 0;
+  padding: 0.85rem 1rem;
+  background: #eef6ff;
+  border: 1px solid #b6d4fe;
+  border-radius: 8px;
+  color: #1a3a5c;
+}
+
+.expenses-filters {
+  margin-top: 1.25rem;
+}
+
+.expenses-filters__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.expenses-filters__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.expenses-filters__actions button {
+  margin-top: 0;
+}
+
+.link-button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0b5fff;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .expense-detail-fields {
   padding: 1.25rem;
   background: #fff;
@@ -272,6 +313,12 @@ button {
   margin: 0;
 }
 
+.expense-dl--meta {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #eee;
+}
+
 .expense-dl dt {
   color: #555;
   font-weight: 600;
@@ -279,6 +326,12 @@ button {
 
 .expense-dl dd {
   margin: 0;
+}
+
+@media (max-width: 720px) {
+  .expenses-filters__row {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {

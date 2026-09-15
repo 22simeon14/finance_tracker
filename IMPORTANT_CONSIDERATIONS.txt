@@ -46,3 +46,8 @@
 11. Beyond expenses: income tracking (form TBD); a Saved/savings area,
     possibly split by categories; investments as a later idea; loan/credit
     instalments (low priority / unlikely).
+12. Expense-detail edits live only in the DOM until Save (PUT). Refresh rebuilds
+    the form from GET, so unsaved field values are lost. To keep a draft without
+    writing to the DB, persist it in sessionStorage (survives refresh, dies with
+    the tab) or localStorage (survives refresh and browser restart). Clear the
+    draft after a successful Save or Unapprove.
