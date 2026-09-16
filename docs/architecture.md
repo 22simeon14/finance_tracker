@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-09-11  
+> **Last updated:** 2026-09-16  
 > This document records accepted decisions and how the system is built. Detail diagrams live under [`diagrams/`](diagrams/).
 
 ## Contents
@@ -65,9 +65,10 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 - Review and correction before final saving.
 - Manual entry when automatic extraction is incomplete or fails.
 - Storage of the original document and the confirmed expense data.
-- Expense list, details, edit, and delete operations.
-- Filters by period, category, and merchant.
-- A basic dashboard with aggregated expense information.
+- Expense list, details, edit, and **unapprove** (remove expense row; document → `REVIEW_REQUIRED`; file kept). Forever wipe of a document + file is only from the pending inbox (`DELETE /documents/{id}`).
+- Filters by period, category, and merchant (AND-combined).
+- A basic dashboard with **aggregates only** (totals by currency / category / merchant; no recent-list widgets).
+- Pending-documents inbox (`GET /documents?status=pending`) to resume review or forever-delete.
 - Basic automated tests and Docker-based local setup.
 
 ### Explicitly excluded
@@ -105,7 +106,7 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 ```mermaid
 flowchart LR
     Browser["Browser<br/>localhost:5173"]
-    Vite["Vite dev server<br/>proxy /auth /documents /expenses …"]
+    Vite["Vite dev server<br/>proxy /auth /documents /expenses /dashboard …"]
     API["Spring Boot<br/>localhost:8080"]
     PG["PostgreSQL<br/>localhost:5432"]
     Disk["Upload volume<br/>UPLOAD_DIR"]
@@ -138,6 +139,7 @@ flowchart TB
         AuthC[auth.AuthController]
         DocC[document.DocumentController]
         ExpC[expense.ExpenseController]
+        DashC[dashboard.DashboardController]
         CatC[category.CategoryController]
         HealthC[health.HealthController]
     end
@@ -152,6 +154,7 @@ flowchart TB
         AuthS[AuthService]
         DocS[DocumentService]
         ExpS[ExpenseService]
+        DashS[DashboardService]
         Mock[MockExtractionService]
         Files[FileStorageService]
     end
@@ -172,6 +175,9 @@ flowchart TB
     DocC --> ExpS
     ExpC --> CU
     ExpC --> ExpS
+    DashC --> CU
+    DashC --> DashS
+    DashS --> ExpR
     DocS --> Mock
     DocS --> Files
     DocS --> DocR
@@ -193,8 +199,9 @@ flowchart TB
 | `auth` | `AuthController`, `AuthService`, request/response DTOs | Register, login, `/me` |
 | `security` | `SecurityConfig`, `JwtAuthFilter`, `JwtService`, `CurrentUser`, `UserPrincipal` | Stateless JWT API; ownership identity |
 | `user` | `User`, `UserRepository` | Account row (`email`, `password_hash`) |
-| `document` | `DocumentController`, `DocumentService`, `FileStorageService`, `MockExtractionService`, entities/DTOs | Upload, mock process, review GET, file stream, pending delete; thin approve HTTP entry |
-| `expense` | `ExpenseController`, `ExpenseService`, `Expense`, `ExpenseRepository`, approve + read DTOs | Atomic approve; owner-scoped list/detail reads |
+| `document` | `DocumentController`, `DocumentService`, `FileStorageService`, `MockExtractionService`, entities/DTOs | Upload, mock process, review GET, pending inbox list, file stream, pending forever-delete; thin approve HTTP entry |
+| `expense` | `ExpenseController`, `ExpenseService`, `Expense`, `ExpenseRepository`, approve / write / view DTOs | Atomic approve; owner-scoped filtered list/detail; edit; unapprove |
+| `dashboard` | `DashboardController`, `DashboardService`, aggregate DTOs | `GET /dashboard` aggregates from `expenses` only (via `ExpenseRepository`) |
 | `category` | `CategoryController`, entity/repo | List active categories |
 | `health` | `HealthController` | Liveness + DB check |
 | `config` | `WebConfig` | MVC CORS for the Vite origin |
@@ -209,13 +216,15 @@ flowchart TB
 | `router.js` | Hash router (`#/…`) |
 | `api.js` | `api()` (JSON + Bearer); `apiBlob()` for file preview |
 | `auth.js` | JWT in `localStorage` (`ft_token`); login helpers |
-| `pages/home.js` | Account, categories sample, health; logged-in link to Expenses |
+| `pages/home.js` | Account, categories sample, health; logged-in links to Dashboard, Expenses, Pending inbox, Upload |
 | `pages/login.js` / `register.js` | Auth forms |
 | `pages/upload.js` | Multipart upload → navigate to review |
 | `pages/review.js` | Preview + editable proposed fields; Approve (→ expenses list) / retry / continue-manual / delete |
-| `pages/expenses.js` | Owner expense list (`GET /expenses`); empty state + link to upload |
-| `pages/expense-detail.js` | One expense (`GET /expenses/{id}`) + document preview/link; no edit/delete |
-| `vite.config.js` | Dev server `:5173` + API proxy (`/auth`, `/documents`, `/expenses`, …) |
+| `pages/expenses.js` | Filtered expense list (`GET /expenses?…`); true-empty vs filtered-empty; post-unapprove notice + link to `#/documents` |
+| `pages/expense-detail.js` | Detail + edit (`PUT`) + unapprove (`DELETE`); preview via `apiBlob`; after unapprove → `#/expenses` |
+| `pages/dashboard.js` | Aggregates only (`GET /dashboard`); optional `from`/`to`; no recent-list widgets |
+| `pages/documents.js` | Pending inbox (`GET /documents?status=pending`); open review; forever-delete |
+| `vite.config.js` | Dev server `:5173` + API proxy (`/auth`, `/documents`, `/expenses`, `/dashboard`, …) |
 
 | Hash route | Page |
 | ---------- | ---- |
@@ -224,8 +233,10 @@ flowchart TB
 | `#/register` | Register |
 | `#/upload` | Upload (logged-in) |
 | `#/review/:id` | Review (logged-in) |
-| `#/expenses` | Expense list (logged-in) |
-| `#/expenses/:id` | Expense details (logged-in) |
+| `#/expenses` | Expense list + filters (logged-in) |
+| `#/expenses/:id` | Expense detail / edit / unapprove (logged-in) |
+| `#/dashboard` | Dashboard aggregates (logged-in) |
+| `#/documents` | Pending-documents inbox (logged-in) |
 
 Unknown hashes fall through to home.
 
@@ -239,20 +250,38 @@ Unknown hashes fall through to home.
 | `GET` | `/auth/me` | JWT | `{ id, email }` |
 | `GET` | `/categories` | JWT | Active categories `{ id, name, slug }` |
 | `POST` | `/documents` | JWT | `201` review DTO (after mock processing) |
+| `GET` | `/documents?status=pending` | JWT | `200` slim inbox rows (`DocumentResponse[]`); only `pending` supported; missing/unknown status → `400` |
 | `GET` | `/documents/{id}` | JWT | Review DTO |
 | `GET` | `/documents/{id}/file` | JWT | File bytes (inline) |
 | `POST` | `/documents/{id}/process` | JWT | Review DTO (retry mock) |
 | `POST` | `/documents/{id}/continue-manual` | JWT | Review DTO (empty extraction) |
 | `POST` | `/documents/{id}/approve` | JWT | `201` `ExpenseResponse` (atomic expense + `SAVED`) |
-| `DELETE` | `/documents/{id}` | JWT | `204` (pending only; `SAVED` → `409`) |
-| `GET` | `/expenses` | JWT | `200` `ExpenseViewResponse[]` (owner only; `expense_date DESC`, then `id DESC`) |
+| `DELETE` | `/documents/{id}` | JWT | `204` (pending/non-`SAVED` forever wipe; `SAVED` → `409`) |
+| `GET` | `/expenses` | JWT | `200` `ExpenseViewResponse[]`; optional `from`, `to`, `categoryId`, `merchant` (AND); order `expense_date DESC`, then `id DESC` |
 | `GET` | `/expenses/{id}` | JWT | `200` `ExpenseViewResponse` (missing/foreign → `404`) |
+| `PUT` | `/expenses/{id}` | JWT | `200` `ExpenseViewResponse` (edit; same validation as approve) |
+| `DELETE` | `/expenses/{id}` | JWT | `204` **unapprove** (delete expense; document → `REVIEW_REQUIRED`; file kept) |
+| `GET` | `/dashboard` | JWT | `200` aggregates; optional `from`/`to` (inclusive `expense_date`) |
 
 Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeBytes`, `createdAt`, `fileUrl`, nullable `extraction` (`rawOcrText`, proposed merchant/date/amount/currency/categoryId`). Never exposes `storage_path`.
 
+**Pending inbox** (`GET /documents?status=pending`): statuses ≠ `SAVED`, ordered `createdAt DESC`. Slim `DocumentResponse`: `id`, `status`, `originalFilename`, `mimeType`, `createdAt`, `fileUrl`. Inbox does not replace re-upload. Forever wipe remains `DELETE /documents/{id}` (pending only).
+
 **Approve** (`POST /documents/{id}/approve`): body = confirmed form fields (`expenseDate`, `totalAmount`, `currency`, `categoryId`, optional `merchant`). Only from `REVIEW_REQUIRED` (`409` otherwise; second approve included). Missing/foreign document → `404`. Invalid amount/currency/category → `400`. One `@Transactional` insert into `expenses` + `documents.status = SAVED`; failure rolls back and leaves `REVIEW_REQUIRED`. Extraction row is not updated (proposals stay as history). Response: `id`, `documentId`, `categoryId`, `merchant`, `expenseDate`, `totalAmount`, `currency`, `createdAt`. UI Approve is shown only for `REVIEW_REQUIRED`; on success navigates to `#/expenses`.
 
-**Expense read** (`GET /expenses`, `GET /expenses/{id}`): ownership via join `expenses.document_id → documents` and `documents.user_id = currentUser` (same 404 policy as documents). `ExpenseViewResponse` = approve fields **plus** `categoryName`, `documentFileUrl` (`/documents/{documentId}/file`), `originalFilename`. Approve’s `ExpenseResponse` shape is unchanged. Filters, edit, delete, and dashboard remain later steps.
+**Expense read / filter** (`GET /expenses`, `GET /expenses/{id}`): ownership via join `expenses.document_id → documents` and `documents.user_id = currentUser` (same 404 policy as documents). List query params (all optional, AND-combined): `from` / `to` (`LocalDate`, inclusive on `expense_date`), `categoryId`, `merchant` (case-insensitive `LIKE %…%`). `ExpenseViewResponse` = approve fields **plus** `categoryName`, `documentFileUrl` (`/documents/{documentId}/file`), `originalFilename`. Approve’s `ExpenseResponse` shape is unchanged.
+
+**Expense edit** (`PUT /expenses/{id}`): body `ExpenseWriteRequest` aligned with approve (`expenseDate`, `totalAmount` > 0, `currency` allowlist, **active** `categoryId`, optional `merchant`). Missing/foreign → `404`; inactive/invalid → `400`. Response: `ExpenseViewResponse`.
+
+**Expense unapprove** (`DELETE /expenses/{id}`): transactional hard-delete of the `expenses` row + set linked document `REVIEW_REQUIRED`; **file kept**. Missing/foreign → `404`. Not a forever wipe — that is only from the pending inbox via `DELETE /documents/{id}`. UI confirms honestly (not “permanent”), then navigates to `#/expenses` with a short notice + link to `#/documents` (no force-redirect to inbox).
+
+**Dashboard** (`GET /dashboard`): aggregates **only from `expenses`** (never extractions or pending docs). Optional `from` / `to` (same inclusive date semantics). Body:
+
+- `totalsByCurrency[]`: `{ currency, totalAmount }`
+- `byCategory[]`: `{ categoryId, categoryName, currency, totalAmount }`
+- `byMerchant[]`: `{ merchant, currency, totalAmount }` (null/blank merchant → `(none)`)
+
+No cross-currency “one fake total”. No recent-expenses or recent-documents widgets (use `#/expenses` / `#/documents` instead). No `SecurityConfig` change (`anyRequest().authenticated()` covers new paths). Vite proxy includes `/dashboard`.
 
 ---
 
@@ -356,7 +385,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 `DELETED` is not a status — pending delete is a hard delete of the row and file.
 
-When a saved expense is hard-deleted later (Flow C), the document returns to `REVIEW_REQUIRED` and the file is kept.
+When a saved expense is **unapproved** (Flow C `DELETE /expenses/{id}`), the document returns to `REVIEW_REQUIRED` and the file is kept. Forever wipe of document + file remains pending-inbox `DELETE /documents/{id}` only.
 
 State diagram: [diagrams/document-status-model.mmd](diagrams/document-status-model.mmd).
 
@@ -371,7 +400,7 @@ stateDiagram-v2
     PROCESSING_FAILED --> [*]: hard delete
     REVIEW_REQUIRED --> SAVED: user approves
     REVIEW_REQUIRED --> [*]: hard delete
-    SAVED --> REVIEW_REQUIRED: expense hard-deleted
+    SAVED --> REVIEW_REQUIRED: expense unapproved
 ```
 
 ### 6.5 Important failure / alternative paths
@@ -410,21 +439,45 @@ stateDiagram-v2
 
 ## 7. Flow C — Expense exploration
 
-After approve, the user can open a saved-expense **list** and **details**. Ownership is always enforced through `documents.user_id`. Dashboard aggregates, filters, edit, and delete are still later steps; when delete lands, removing an expense will return its document to `REVIEW_REQUIRED` and keep the file.
+After approve, the user can **list** (with filters), **view**, **edit**, and **unapprove** saved expenses, see **dashboard aggregates**, and manage unfinished work in the **pending-documents inbox**. Ownership is always enforced through `documents.user_id`.
 
-### Current contract (Step 12)
+### Current contract (Step 13)
 
 | Capability | Behaviour |
 | ---------- | --------- |
-| List | `GET /expenses` → `ExpenseViewResponse[]` ordered by `expense_date DESC`, then `id DESC` |
-| Details | `GET /expenses/{id}` → one `ExpenseViewResponse`; missing or other user’s id → `404` |
-| Auth | No token → `401` (`anyRequest().authenticated()`; no `SecurityConfig` change) |
-| UI | `#/expenses` list (empty state + upload link); `#/expenses/:id` fields + document preview via `documentFileUrl` / `apiBlob`; home “Expenses” link when logged in |
-| After approve | Review navigates to `#/expenses` so the new row is visible immediately |
+| List + filters | `GET /expenses` with optional `from`, `to`, `categoryId`, `merchant` (AND). Order `expense_date DESC`, then `id DESC` |
+| Details | `GET /expenses/{id}` → `ExpenseViewResponse`; missing/foreign → `404` |
+| Edit | `PUT /expenses/{id}` with approve-aligned body; active category required; response `ExpenseViewResponse` |
+| Unapprove | `DELETE /expenses/{id}` → `204`; delete expense + document `REVIEW_REQUIRED`; **file kept**. After UI: `#/expenses` + short notice + link to `#/documents` (not force-redirect to inbox) |
+| Forever wipe | Only from pending inbox: existing `DELETE /documents/{id}` (pending/non-`SAVED`); removes row + file |
+| Dashboard | `GET /dashboard` optional `from`/`to`; `totalsByCurrency`, `byCategory`, `byMerchant` from **`expenses` only**; no recent-list widgets |
+| Pending inbox | `GET /documents?status=pending` (≠ `SAVED`, `createdAt DESC`); open `#/review/:id`; does **not** replace re-upload |
+| Empty states | No expenses → upload CTA; filters match nothing → “No expenses match” + clear; inbox empty → “No pending documents” |
+| Auth | No token → `401`; foreign ids → `404` (`anyRequest().authenticated()`; no `SecurityConfig` change) |
+| UI | `#/expenses` filters; `#/expenses/:id` edit/unapprove; `#/dashboard`; `#/documents`; home links when logged in |
 
-`ExpenseController` + `ExpenseService.list` / `getById` join expenses to documents by owner. Category name is resolved via `CategoryRepository` (still shown if the category later becomes inactive).
+`ExpenseController` + `ExpenseService` own filtered list, detail, update, and unapprove. `DashboardController` + `DashboardService` read aggregates via `ExpenseRepository`. `DocumentService.listPending` backs the inbox.
 
-Full product activity diagram (incl. future filters/edit/delete/dashboard): [diagrams/expense-exploration-flow.mmd](diagrams/expense-exploration-flow.mmd).
+Full product activity diagram: [diagrams/expense-exploration-flow.mmd](diagrams/expense-exploration-flow.mmd).
+
+```mermaid
+flowchart LR
+  subgraph expensesFlow [Expenses]
+    List[FilteredList]
+    Edit[Edit]
+    Unapprove[Unapprove]
+  end
+  subgraph dash [Dashboard]
+    Agg[TotalsByCategoryMerchant]
+  end
+  subgraph inbox [PendingInbox]
+    PendingList[NonSavedDocs]
+    Resume[OpenReview]
+    Forever[DeleteDocumentAndFile]
+  end
+  Unapprove -->|"doc REVIEW_REQUIRED"| PendingList
+  Forever -->|"existing DELETE /documents/id"| Gone[Removed]
+```
 
 ```mermaid
 sequenceDiagram
@@ -433,18 +486,23 @@ sequenceDiagram
     participant Svc as ExpenseService
     participant DB as Postgres
 
-    UI->>API: GET /expenses JWT
-    API->>Svc: list(userId)
+    UI->>API: GET /expenses?filters JWT
+    API->>Svc: list(userId, filters)
     Svc->>DB: expenses join documents by userId
     Svc-->>UI: 200 ExpenseViewResponse[]
 
-    UI->>API: GET /expenses/id JWT
-    API->>Svc: getById(userId, id)
+    UI->>API: PUT /expenses/id JWT
+    API->>Svc: update(userId, id, body)
     alt missing or foreign
         Svc-->>UI: 404
     else owned
         Svc-->>UI: 200 ExpenseViewResponse
     end
+
+    UI->>API: DELETE /expenses/id JWT
+    API->>Svc: unapprove(userId, id)
+    Svc->>DB: delete expense; document REVIEW_REQUIRED
+    Svc-->>UI: 204
 ```
 
 ---
@@ -498,7 +556,7 @@ erDiagram
 - No expense while status is `UPLOADED` / `PROCESSING` / `REVIEW_REQUIRED` / `PROCESSING_FAILED`.
 - Lists and dashboard query `expenses` only.
 - Owner isolation on every document/expense load.
-- Pending delete removes document + file; Flow C expense delete keeps the file and sets `REVIEW_REQUIRED`.
+- Pending forever-delete removes document + file; Flow C **unapprove** (`DELETE /expenses/{id}`) keeps the file and sets `REVIEW_REQUIRED`.
 
 Column-level detail lives in `001_create_mvp_schema.sql` and the ER diagram source — this doc does not repeat every column.
 
@@ -540,6 +598,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-16 | Step 13: expense filters (`from`/`to`/`categoryId`/`merchant`); `PUT`/`DELETE` expenses (edit + unapprove); `GET /dashboard` aggregates only; `GET /documents?status=pending` inbox; UI routes `#/dashboard`, `#/documents`; Flow C contract (unapprove vs forever wipe; no recent-list widgets). |
 | 2026-09-11 | Step 12: `GET /expenses`, `GET /expenses/{id}` (`ExpenseViewResponse`); list/details UI; approve navigates to `#/expenses`; Flow C current contract. |
 | 2026-09-11 | Step 11: `POST /documents/{id}/approve` — atomic `expenses` insert + `SAVED`; `expense` package + review Approve UI; extraction left as history. |
 | 2026-09-08 | Compacted architecture doc: system shape (deployment, packages, frontend, API), linked detail diagrams, removed duplicated inline flows; Step 10 mock/review contract kept. |
