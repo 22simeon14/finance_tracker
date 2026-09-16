@@ -12,6 +12,8 @@ import { renderUploadPage } from './pages/upload.js';
 import { renderReviewPage } from './pages/review.js';
 import { renderExpensesPage } from './pages/expenses.js';
 import { renderExpenseDetailPage } from './pages/expense-detail.js';
+import { renderDashboardPage } from './pages/dashboard.js';
+import { renderDocumentsPage } from './pages/documents.js';
 
 const app = document.getElementById('app');
 
@@ -40,6 +42,14 @@ startRouter((route) => {
   const expenseMatch = route.match(/^\/expenses\/(\d+)$/);
   if (expenseMatch) {
     renderExpenseDetailPage(app, expenseMatch[1]);
+    return;
+  }
+  if (route === '/dashboard') {
+    renderDashboardPage(app);
+    return;
+  }
+  if (route === '/documents') {
+    renderDocumentsPage(app);
     return;
   }
   renderHomePage(app);

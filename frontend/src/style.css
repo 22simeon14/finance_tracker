@@ -91,6 +91,7 @@ button {
 
 .account-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   align-items: center;
   margin-top: 0.75rem;
@@ -341,6 +342,128 @@ button {
 
   .expense-row__merchant {
     grid-column: 1 / -1;
+  }
+}
+
+.dashboard-section {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.dashboard-section h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.dashboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboard-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.dashboard-row:last-child {
+  border-bottom: 0;
+}
+
+.dashboard-row__label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-row__meta {
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.dashboard-row__amount {
+  font-weight: 600;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.dashboard-empty {
+  margin: 0;
+  color: #555;
+}
+
+.documents-list {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.document-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.document-row__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.document-row__main:hover .document-row__name {
+  text-decoration: underline;
+}
+
+.document-row__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-row__status,
+.document-row__date {
+  color: #555;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.document-row__delete {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .document-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .document-row__main {
+    grid-template-columns: 1fr;
   }
 }
 

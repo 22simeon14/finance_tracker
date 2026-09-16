@@ -2,8 +2,8 @@
  * Main Responsibility: Vite frontend config — dev server and API proxy.
  *
  * Dev server listens on 5173. Paths /health, /auth, /categories, /documents,
- * and /expenses are proxied to the Spring backend on localhost:8080 so the
- * browser can call same-origin URLs (no CORS issues during local development).
+ * /expenses, and /dashboard are proxied to the Spring backend on localhost:8080
+ * so the browser can call same-origin URLs (no CORS issues during local development).
  *
  * Note: package.json cannot hold comments; this file documents the frontend setup.
  */
@@ -18,6 +18,7 @@ export default defineConfig({
       '/categories': 'http://localhost:8080',
       '/documents': 'http://localhost:8080',
       '/expenses': 'http://localhost:8080',
+      '/dashboard': 'http://localhost:8080',
     },
   },
 });

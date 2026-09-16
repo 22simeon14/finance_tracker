@@ -1,8 +1,9 @@
 /**
  * Main Responsibility: Home page UI — account, categories proof, and health check.
  *
- * Shows login/register links when logged out, or email + expenses + upload + logout
- * when logged in. After a successful /auth/me, loads GET /categories (JWT-protected)
+ * Shows login/register links when logged out, or email + dashboard / expenses /
+ * pending inbox / upload + logout when logged in. After a successful /auth/me,
+ * loads GET /categories (JWT-protected)
  * and lists names. Health uses plain fetch("/health") (proxied by Vite) instead of
  * api(), because it is public and does not need a Bearer token.
  */
@@ -83,7 +84,9 @@ export function renderHomePage(root) {
       const me = await api('/auth/me');
       accountStatusEl.textContent = `Logged in as ${me.email}`;
       accountActionsEl.innerHTML = `
+        <a href="#/dashboard">Dashboard</a>
         <a href="#/expenses">Expenses</a>
+        <a href="#/documents">Pending inbox</a>
         <a href="#/upload">Upload document</a>
         <button type="button" id="logout-btn">Log out</button>
       `;
