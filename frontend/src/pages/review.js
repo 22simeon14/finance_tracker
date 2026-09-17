@@ -9,7 +9,8 @@ import { api, apiBlob } from '../api.js';
 import { isLoggedIn } from '../auth.js';
 import { navigate } from '../router.js';
 
-const CURRENCIES = ['EUR', 'USD', 'GBP'];
+/** Product is EUR-only; column stays, UI no longer offers USD/GBP. */
+const CURRENCY = 'EUR';
 
 /** Revoke the last preview blob URL so repeated visits do not leak memory. */
 let activePreviewUrl = null;
@@ -55,9 +56,7 @@ export function renderReviewPage(root, documentId) {
             </label>
             <label>
               Currency
-              <select name="currency">
-                ${CURRENCIES.map((code) => `<option value="${code}">${code}</option>`).join('')}
-              </select>
+              <input type="text" name="currency" value="${CURRENCY}" readonly />
             </label>
             <label>
               Category
@@ -160,7 +159,7 @@ export function renderReviewPage(root, documentId) {
     formEl.querySelector('[name="date"]').value = extraction?.proposedDate ?? '';
     formEl.querySelector('[name="amount"]').value =
       extraction?.proposedAmount != null ? String(extraction.proposedAmount) : '';
-    formEl.querySelector('[name="currency"]').value = extraction?.proposedCurrency ?? 'EUR';
+    formEl.querySelector('[name="currency"]').value = CURRENCY;
     categorySelectEl.value =
       extraction?.proposedCategoryId != null ? String(extraction.proposedCategoryId) : '';
 
@@ -212,7 +211,6 @@ export function renderReviewPage(root, documentId) {
     const merchant = formEl.querySelector('[name="merchant"]').value.trim();
     const expenseDate = formEl.querySelector('[name="date"]').value;
     const amountRaw = formEl.querySelector('[name="amount"]').value;
-    const currency = formEl.querySelector('[name="currency"]').value;
     const categoryIdRaw = formEl.querySelector('[name="categoryId"]').value;
 
     if (!expenseDate || !amountRaw || !categoryIdRaw) {
@@ -237,7 +235,7 @@ export function renderReviewPage(root, documentId) {
         body: JSON.stringify({
           expenseDate,
           totalAmount,
-          currency,
+          currency: CURRENCY,
           categoryId: Number(categoryIdRaw),
           merchant: merchant || null,
         }),

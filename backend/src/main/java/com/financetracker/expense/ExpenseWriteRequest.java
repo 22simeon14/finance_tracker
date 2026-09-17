@@ -12,12 +12,12 @@ import java.time.LocalDate;
  * Main Responsibility: Validated JSON body for PUT /expenses/{id}.
  *
  * Same confirmed fields as approve so edit reuses the same rules
- * (amount > 0, currency allowlist, active category, optional merchant).
+ * (amount > 0, currency EUR only, active category, optional merchant).
  */
 public record ExpenseWriteRequest(
         @NotNull LocalDate expenseDate,
         @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal totalAmount,
-        @NotNull @Pattern(regexp = "EUR|USD|GBP") String currency,
+        @NotNull @Pattern(regexp = "EUR") String currency,
         @NotNull Long categoryId,
         @Size(max = 255) String merchant
 ) {

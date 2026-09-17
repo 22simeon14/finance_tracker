@@ -9,7 +9,8 @@ import { api, apiBlob } from '../api.js';
 import { isLoggedIn } from '../auth.js';
 import { navigate } from '../router.js';
 
-const CURRENCIES = ['EUR', 'USD', 'GBP'];
+/** Product is EUR-only; column stays, UI no longer offers USD/GBP. */
+const CURRENCY = 'EUR';
 
 /** Must match expenses.js so the list can show the post-unapprove notice. */
 const UNAPPROVE_NOTICE_KEY = 'expenseUnapproveNotice';
@@ -57,9 +58,7 @@ export function renderExpenseDetailPage(root, expenseId) {
             </label>
             <label>
               Currency
-              <select name="currency">
-                ${CURRENCIES.map((code) => `<option value="${code}">${code}</option>`).join('')}
-              </select>
+              <input type="text" name="currency" value="${CURRENCY}" readonly />
             </label>
             <label>
               Category
@@ -164,7 +163,7 @@ export function renderExpenseDetailPage(root, expenseId) {
     formEl.querySelector('[name="expenseDate"]').value = expense.expenseDate ?? '';
     formEl.querySelector('[name="totalAmount"]').value =
       expense.totalAmount != null ? String(expense.totalAmount) : '';
-    formEl.querySelector('[name="currency"]').value = expense.currency || 'EUR';
+    formEl.querySelector('[name="currency"]').value = CURRENCY;
     categorySelectEl.value =
       expense.categoryId != null ? String(expense.categoryId) : '';
     root.querySelector('#field-created').textContent = formatDateTime(expense.createdAt);
@@ -206,7 +205,6 @@ export function renderExpenseDetailPage(root, expenseId) {
     const merchant = formEl.querySelector('[name="merchant"]').value.trim();
     const expenseDate = formEl.querySelector('[name="expenseDate"]').value;
     const amountRaw = formEl.querySelector('[name="totalAmount"]').value;
-    const currency = formEl.querySelector('[name="currency"]').value;
     const categoryIdRaw = formEl.querySelector('[name="categoryId"]').value;
 
     if (!expenseDate || !amountRaw || !categoryIdRaw) {
@@ -232,7 +230,7 @@ export function renderExpenseDetailPage(root, expenseId) {
         body: JSON.stringify({
           expenseDate,
           totalAmount,
-          currency,
+          currency: CURRENCY,
           categoryId: Number(categoryIdRaw),
           merchant: merchant || null,
         }),

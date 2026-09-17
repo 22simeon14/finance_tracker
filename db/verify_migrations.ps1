@@ -1,5 +1,5 @@
-# Verify MVP migrations on a clean temporary PostgreSQL container.
-# Happy path only: apply 001 + 002, then run db/verify_happy_path.sql
+# Main Responsibility: Verify MVP migrations on a clean temporary PostgreSQL container.
+# Happy path only: apply 001 + 002 + 003, then run db/verify_happy_path.sql
 
 $ErrorActionPreference = "Stop"
 
@@ -13,6 +13,7 @@ $KeepContainer = if ($env:KEEP_CONTAINER) { $env:KEEP_CONTAINER } else { "0" }
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Migration001 = Join-Path $RepoRoot "db/migrations/001_create_mvp_schema.sql"
 $Migration002 = Join-Path $RepoRoot "db/migrations/002_seed_categories.sql"
+$Migration003 = Join-Path $RepoRoot "db/migrations/003_currency_eur_only.sql"
 $VerifySql = Join-Path $RepoRoot "db/verify_happy_path.sql"
 
 function Invoke-Docker {
@@ -97,6 +98,9 @@ try {
 
     Write-Host "Applying 002_seed_categories.sql..."
     Invoke-PsqlFile -FilePath $Migration002
+
+    Write-Host "Applying 003_currency_eur_only.sql..."
+    Invoke-PsqlFile -FilePath $Migration003
 
     Write-Host "Running happy-path verification..."
     Invoke-PsqlFile -FilePath $VerifySql
