@@ -1,0 +1,27 @@
+%% Main Responsibility: Header extraction pipeline (text → parse → validate).
+%% Product Flow B still owns upload/review/approve; this diagram is the PROCESSING step.
+%% Sync in POST /documents and POST /documents/{id}/process. Line items stay out of DB/UI.
+
+flowchart TD
+  start([PROCESSING starts]) --> mime{MIME type?}
+
+  mime -->|application/pdf| pdfbox[PDFBox text layer]
+  pdfbox --> usable{Usable digital text?}
+  usable -->|yes| textSrc[OcrResult text]
+  usable -->|no| raster[Rasterize pages to PNG]
+  raster --> ocr
+
+  mime -->|image/jpeg or png| img[Image bytes]
+  img --> ocr[OCR sidecar]
+
+  ocr --> textSrc
+  textSrc --> blank{Non-blank text?}
+  blank -->|no| failed[PROCESSING_FAILED]
+  blank -->|yes| parse[ReceiptParser LLM on text only]
+  parse --> validate[Java ExtractionValidator<br/>EUR · date · amount · category]
+  validate --> header{Any usable header?}
+  header -->|yes| review[REVIEW_REQUIRED]
+  header -->|no| failed
+
+  review --> human[User edits and approve]
+  failed --> recover[Retry · continue-manual · or delete]

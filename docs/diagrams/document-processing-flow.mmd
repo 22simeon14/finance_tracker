@@ -43,10 +43,10 @@ flowchart TB
     subgraph processing["2. Automated processing"]
         direction TB
         set_processing["Set status PROCESSING"]
-        ocr["Run OCR"]
-        ocr_check{"OCR result usable?"}
-        extract["Extract proposed fields<br/>merchant · date · total · currency · category"]
-        normalize["Validate and normalise<br/>proposed values"]
+        text_extract["Extract text<br/>PDFBox and/or OCR sidecar"]
+        text_check{"Text usable?"}
+        parse["Parse header fields<br/>LLM on text only"]
+        normalize["Validate proposed values<br/>EUR · date · amount · category"]
         review_required["Set status REVIEW_REQUIRED"]
 
         failed["Set status PROCESSING_FAILED"]
@@ -58,11 +58,11 @@ flowchart TB
         continue_manual(["CONTINUE AT SECTION 3<br/>User review with an empty form"])
         no_expense_1(["END<br/>No expense created"])
 
-        set_processing --> ocr --> ocr_check
-        ocr_check -->|YES / PARTIAL| extract
-        extract --> normalize --> review_required
+        set_processing --> text_extract --> text_check
+        text_check -->|YES / PARTIAL| parse
+        parse --> normalize --> review_required
 
-        ocr_check -->|NO| failed
+        text_check -->|NO| failed
         failed --> failed_choice
         failed_choice -->|RETRY| retry_processing
         failed_choice -->|MANUAL| manual
@@ -143,8 +143,8 @@ flowchart TB
     class start startNode
     class select action
     class upload_file,store uploadAction
-    class set_processing,ocr,extract,normalize processAction
-    class client_check,server_check,storage_ok,ocr_check,user_action,validate,save_check decision
+    class set_processing,text_extract,parse,normalize processAction
+    class client_check,server_check,storage_ok,text_check,user_action,validate,save_check decision
     class failed_choice orangeAction
     class review_required reviewGate
     class show_review,approve reviewAction

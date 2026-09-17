@@ -1,0 +1,39 @@
+%% Main Responsibility: Class collaboration for document.extraction during PROCESSING.
+%% DocumentService owns statuses/files; ExtractionPipeline is the single extract entry point.
+
+flowchart TB
+  DocS[document.DocumentService]
+  Pipe[extraction.ExtractionPipeline]
+  Val[extraction.ExtractionValidator]
+  CatR[category.CategoryRepository]
+
+  DocS -->|"extract(path, mime)"| Pipe
+  Pipe --> Gateway
+  Pipe --> Parser
+  Pipe --> Val
+  Pipe --> CatR
+
+  Gateway[DocumentTextGateway]
+  Impl[DefaultDocumentTextGateway]
+  Gateway -.->|implements| Impl
+
+  PdfText[PdfDigitalTextExtractor]
+  Usable[PdfTextUsability]
+  Raster[PdfPageRasterizer]
+  Merger[OcrResultMerger]
+  Ocr[OcrClient]
+
+  Impl --> PdfText
+  Impl --> Usable
+  Impl --> Raster
+  Impl --> Ocr
+  Impl --> Merger
+
+  Parser[ReceiptParser]
+  %% GrokReceiptParser is the planned production bean; swap later without touching DocumentService.
+
+  OcrResult[OcrResult + OcrLine]
+  ExtResult[ExtractionResult]
+  Pipe --> ExtResult
+  Gateway --> OcrResult
+  Parser --> ExtResult

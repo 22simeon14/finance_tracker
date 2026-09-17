@@ -1,13 +1,24 @@
 # finance_tracker
 Web app that helps you analyze your spending
 
+## Documentation
+
+The system is documented in the [`docs/`](docs/) folder:
+
+- **[`docs/architecture.md`](docs/architecture.md)** — main architecture doc (product scope, stack, packages, API, Flows A/B/C, data model, principles)
+- **[`docs/diagrams/`](docs/diagrams/)** — detail Mermaid (and some SVG) diagrams linked from architecture.md
+- **[`db/README.md`](db/README.md)** — SQL migrations and how to apply them
+
+Start with `docs/architecture.md` if you are new to the repo.
+
 ## MVP Tech Stack
 - Backend: Java 21+ + Spring Boot 3 (REST JSON API), JWT authentication (Spring Security), BCrypt password hashes
-- Database: PostgreSQL (Docker) + SQL migrations in `db/migrations/`
+- Database: PostgreSQL (Docker) + SQL migrations in `db/migrations/` (currency **EUR only** after `003`)
 - Persistence: Spring Data JPA (Hibernate), with schema controlled by SQL migrations
 - Frontend: Vite + plain JavaScript (hash routing + `fetch`), register/login UI with JWT in the browser
+- Document text: Apache PDFBox for digital PDFs; RapidOCR sidecar + Grok text parse (wiring in progress)
 - File uploads: local Docker volume
-- Local orchestration: Docker Compose
+- Local orchestration: Docker Compose (Postgres + backend today; OCR sidecar next)
 
 ## Prerequisites
 - Docker
@@ -44,4 +55,4 @@ npm run dev
 
 **Note:** SQL migrations run automatically only on the first PostgreSQL volume creation (via `docker-entrypoint-initdb.d`). If the database volume already exists without schema, reset with `docker compose down -v` or apply migrations manually — see [db/README.md](db/README.md).
 
-More detail: [docs/architecture.md](docs/architecture.md) (Flow A — Authentication).
+For how the app is structured (auth, document processing, expenses, data model), see **[docs/architecture.md](docs/architecture.md)** and the diagrams under **[docs/diagrams/](docs/diagrams/)**.

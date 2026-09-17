@@ -67,4 +67,4 @@ docker exec -it finance_tracker_verify_pg psql -U postgres -d finance_tracker_ve
 
 The SQL migrations are the schema source of truth. Spring Data JPA entities map to these tables for reads/writes; Hibernate must not generate or alter DDL (`ddl-auto=none`).
 
-See `docs/architecture.md` section 8 (Data model) for table responsibilities, invariants, and application business rules.
+See `docs/architecture.md` section 8 (Data model) for table responsibilities, invariants, and application business rules. Diagrams for extraction and document flows live under `docs/diagrams/`.

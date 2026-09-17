@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-09-16  
+> **Last updated:** 2026-09-17  
 > This document records accepted decisions and how the system is built. Detail diagrams live under [`diagrams/`](diagrams/).
 
 ## Contents
@@ -41,7 +41,7 @@ flowchart LR
 Receipts and invoices are unstructured (paper, photos, PDFs). Manual entry is slow. The MVP turns a document into a verified structured expense:
 
 ```text
-Document → OCR text → proposed fields → user verification → saved expense
+Document → text (PDFBox and/or OCR) → proposed fields → user verification → saved expense
 ```
 
 It is not accounting software. Receipts are evidence for personal expenses, not full accounting objects.
@@ -60,8 +60,8 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 - One application role: `USER`.
 - Upload of supported image and PDF files.
 - Secure association of every document and expense with its owner.
-- OCR text extraction.
-- Extraction of merchant, date, total amount, currency, and category.
+- Text extraction from digital PDFs (PDFBox) and from images/scans (OCR sidecar — wiring in progress).
+- Extraction of merchant, date, total amount, currency (**EUR only**), and category.
 - Review and correction before final saving.
 - Manual entry when automatic extraction is incomplete or fails.
 - Storage of the original document and the confirmed expense data.
@@ -97,8 +97,12 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 | Validation | Jakarta Bean Validation on request DTOs |
 | Persistence | Spring Data JPA; schema owned by SQL in `db/migrations/` (`ddl-auto=none`) |
 | Database | PostgreSQL 16 |
+| PDF text | Apache PDFBox (digital text layer + page rasterize for scans) |
+| OCR | RapidOCR sidecar (HTTP) — decided; Compose/client wiring in progress |
+| Receipt parse | LLM on **text only** (Grok / xAI) — decided; client wiring in progress |
 | Frontend | Vite + plain JavaScript (hash routing + `fetch`) |
 | Files | Local disk under `UPLOAD_DIR` (Docker volume in Compose) |
+| Currency | **EUR only** (column kept; UI submits `EUR`) |
 | Local run | Docker Compose for Postgres + backend; frontend on the host |
 
 ### 4.2 Deployment (local)
@@ -118,9 +122,10 @@ flowchart LR
     API --> Disk
 ```
 
-- **Compose** (`docker-compose.yml`): `postgres` + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created).
+- **Compose today** (`docker-compose.yml`): `postgres` + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created). Apply later migrations (for example `003_currency_eur_only.sql`) once with `psql` — see [`db/README.md`](../db/README.md).
+- **Next Compose step (decided):** add an internal `ocr` service (RapidOCR). Backend will call it via `OCR_BASE_URL` (not published to the host). Images stay on our disk; the LLM receives text only.
 - **Frontend** is not in Compose: `cd frontend && npm run dev`.
-- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL.
+- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL. Planned: `OCR_BASE_URL`, `GROK_API_KEY`, `GROK_API_BASE_URL`, `GROK_MODEL`.
 
 How requests move:
 
@@ -155,7 +160,7 @@ flowchart TB
         DocS[DocumentService]
         ExpS[ExpenseService]
         DashS[DashboardService]
-        Mock[MockExtractionService]
+        Pipe[extraction.ExtractionPipeline]
         Files[FileStorageService]
     end
 
@@ -178,7 +183,7 @@ flowchart TB
     DashC --> CU
     DashC --> DashS
     DashS --> ExpR
-    DocS --> Mock
+    DocS --> Pipe
     DocS --> Files
     DocS --> DocR
     DocS --> ExtR
@@ -199,7 +204,8 @@ flowchart TB
 | `auth` | `AuthController`, `AuthService`, request/response DTOs | Register, login, `/me` |
 | `security` | `SecurityConfig`, `JwtAuthFilter`, `JwtService`, `CurrentUser`, `UserPrincipal` | Stateless JWT API; ownership identity |
 | `user` | `User`, `UserRepository` | Account row (`email`, `password_hash`) |
-| `document` | `DocumentController`, `DocumentService`, `FileStorageService`, `MockExtractionService`, entities/DTOs | Upload, mock process, review GET, pending inbox list, file stream, pending forever-delete; thin approve HTTP entry |
+| `document` | `DocumentController`, `DocumentService`, `FileStorageService`, entities/DTOs | Upload, process, review GET, pending inbox, file stream, pending forever-delete; thin approve HTTP entry |
+| `document.extraction` | `ExtractionPipeline`, `DocumentTextGateway`, `ReceiptParser`, `ExtractionValidator`, PDFBox helpers, `OcrClient` | Text extract → parse → validate; never creates expenses |
 | `expense` | `ExpenseController`, `ExpenseService`, `Expense`, `ExpenseRepository`, approve / write / view DTOs | Atomic approve; owner-scoped filtered list/detail; edit; unapprove |
 | `dashboard` | `DashboardController`, `DashboardService`, aggregate DTOs | `GET /dashboard` aggregates from `expenses` only (via `ExpenseRepository`) |
 | `category` | `CategoryController`, entity/repo | List active categories |
@@ -207,6 +213,22 @@ flowchart TB
 | `config` | `WebConfig` | MVC CORS for the Vite origin |
 
 **Typical collaboration (protected document/expense call):** browser → `JwtAuthFilter` → controller → `CurrentUser` → `DocumentService` / `ExpenseService` → repositories / `FileStorageService` → JSON or file bytes.
+
+**Extraction collaboration:** `DocumentService` → `ExtractionPipeline.extract` → text gateway + receipt parser + validator. Detail: [diagrams/extraction-classes.mmd](diagrams/extraction-classes.mmd).
+
+```mermaid
+flowchart TB
+  DocS[DocumentService]
+  Pipe[ExtractionPipeline]
+  Gateway[DocumentTextGateway]
+  Parser[ReceiptParser]
+  Val[ExtractionValidator]
+
+  DocS -->|"statuses + files"| Pipe
+  Pipe --> Gateway
+  Pipe --> Parser
+  Pipe --> Val
+```
 
 ### 4.4 Frontend structure
 
@@ -249,11 +271,11 @@ Unknown hashes fall through to home.
 | `POST` | `/auth/login` | Public | `200` `{ token }` |
 | `GET` | `/auth/me` | JWT | `{ id, email }` |
 | `GET` | `/categories` | JWT | Active categories `{ id, name, slug }` |
-| `POST` | `/documents` | JWT | `201` review DTO (after mock processing) |
+| `POST` | `/documents` | JWT | `201` review DTO (after sync processing) |
 | `GET` | `/documents?status=pending` | JWT | `200` slim inbox rows (`DocumentResponse[]`); only `pending` supported; missing/unknown status → `400` |
 | `GET` | `/documents/{id}` | JWT | Review DTO |
 | `GET` | `/documents/{id}/file` | JWT | File bytes (inline) |
-| `POST` | `/documents/{id}/process` | JWT | Review DTO (retry mock) |
+| `POST` | `/documents/{id}/process` | JWT | Review DTO (retry extraction) |
 | `POST` | `/documents/{id}/continue-manual` | JWT | Review DTO (empty extraction) |
 | `POST` | `/documents/{id}/approve` | JWT | `201` `ExpenseResponse` (atomic expense + `SAVED`) |
 | `DELETE` | `/documents/{id}` | JWT | `204` (pending/non-`SAVED` forever wipe; `SAVED` → `409`) |
@@ -271,7 +293,7 @@ Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeByte
 
 **Expense read / filter** (`GET /expenses`, `GET /expenses/{id}`): ownership via join `expenses.document_id → documents` and `documents.user_id = currentUser` (same 404 policy as documents). List query params (all optional, AND-combined): `from` / `to` (`LocalDate`, inclusive on `expense_date`), `categoryId`, `merchant` (case-insensitive `LIKE %…%`). `ExpenseViewResponse` = approve fields **plus** `categoryName`, `documentFileUrl` (`/documents/{documentId}/file`), `originalFilename`. Approve’s `ExpenseResponse` shape is unchanged.
 
-**Expense edit** (`PUT /expenses/{id}`): body `ExpenseWriteRequest` aligned with approve (`expenseDate`, `totalAmount` > 0, `currency` allowlist, **active** `categoryId`, optional `merchant`). Missing/foreign → `404`; inactive/invalid → `400`. Response: `ExpenseViewResponse`.
+**Expense edit** (`PUT /expenses/{id}`): body `ExpenseWriteRequest` aligned with approve (`expenseDate`, `totalAmount` > 0, `currency` = `EUR`, **active** `categoryId`, optional `merchant`). Missing/foreign → `404`; inactive/invalid → `400`. Response: `ExpenseViewResponse`.
 
 **Expense unapprove** (`DELETE /expenses/{id}`): transactional hard-delete of the `expenses` row + set linked document `REVIEW_REQUIRED`; **file kept**. Missing/foreign → `404`. Not a forever wipe — that is only from the pending inbox via `DELETE /documents/{id}`. UI confirms honestly (not “permanent”), then navigates to `#/expenses` with a short notice + link to `#/documents` (no force-redirect to inbox).
 
@@ -352,13 +374,24 @@ Turn an uploaded receipt/invoice into a **user-approved** expense without silent
 6. Backend validates again, creates `expenses`, sets document `SAVED`.
 7. Expense appears in list / filters / dashboard.
 
-Full activity diagram (including failures and manual continue): [diagrams/document-processing-flow.mmd](diagrams/document-processing-flow.mmd) (SVG: [document-processing-flow.svg](diagrams/document-processing-flow.svg)).
+Full activity diagram (including failures and manual continue): [diagrams/document-processing-flow.mmd](diagrams/document-processing-flow.mmd) (SVG: [document-processing-flow.svg](diagrams/document-processing-flow.svg)). Extraction internals: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd).
 
-### 6.3 Upload, mock processing, review, and approve (current contract)
+### 6.3 Upload, extraction, review, and approve (current contract)
 
-Processing runs **synchronously** inside `POST /documents` after the row is saved. The `201` body already has the post-processing status. Real OCR libraries are not used yet — `MockExtractionService` fills deterministic sample fields (merchant `Demo Cafe`, amount `12.50`, `EUR`, today’s date; category left null on purpose).
+Processing runs **synchronously** inside `POST /documents` after the row is saved. The `201` body already has the post-processing status. The same pipeline runs on `POST /documents/{id}/process`.
 
-**Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → mock extract → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
+**Pipeline (decided):**
+
+1. **Text** — `DocumentTextGateway`: digital PDF → PDFBox text layer when usable; otherwise rasterize pages and OCR. JPEG/PNG → OCR sidecar.
+2. **Parse** — `ReceiptParser` (LLM on text only; images are not sent to the model).
+3. **Validate** — `ExtractionValidator` (EUR, amount/date sanity, unknown category → null). Does not invent totals with regex.
+4. **Outcome** — any usable header → `REVIEW_REQUIRED`; empty text / hard failure → `PROCESSING_FAILED`.
+
+Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd), [extraction-classes.mmd](diagrams/extraction-classes.mmd).
+
+**Implementation status:** PDFBox digital-text path and rasterize fallback are in the backend. OCR sidecar HTTP client, Compose `ocr` service, and Grok `ReceiptParser` bean are the remaining wiring steps. Until those beans are present, processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
+
+**Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → `ExtractionPipeline` → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 
 **Approve** (`POST /documents/{id}/approve`, JWT): `DocumentController` delegates to `ExpenseService.approve`. Body carries confirmed fields (not a re-read of extraction). Only `REVIEW_REQUIRED` is allowed. In one DB transaction the service inserts `expenses` and sets `documents.status = SAVED`. Any failure rolls back — no orphan expense and status stays `REVIEW_REQUIRED`. `document_extractions` is left unchanged. Unique `expenses.document_id` is a safety net against double approve. Frontend shows Approve only when status is `REVIEW_REQUIRED`; success navigates to `#/expenses`.
 
@@ -366,12 +399,14 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 - MIME: `image/jpeg`, `image/png`, `application/pdf`; max **5 MB**.
 - Disk path: `{UPLOAD_DIR}/{userId}/{uuid}{ext}` (client filename is not used for the path).
-- Filename containing `fail` (case-insensitive) → `PROCESSING_FAILED`, no usable extraction.
+- Currency is **EUR only** (DB check, API validation, review/edit UI readonly `EUR`).
+- Partial headers (for example total found, merchant null) still go to review.
 - `POST …/process` — retry from `UPLOADED` or `PROCESSING_FAILED` only (`409` otherwise).
 - `POST …/continue-manual` — from `PROCESSING_FAILED` only; empty extraction row + `REVIEW_REQUIRED`.
 - `POST …/approve` — from `REVIEW_REQUIRED` only; atomic expense insert + `SAVED` (`409` if wrong status; `400` if validation/category fails).
 - `DELETE` — hard-delete pending document (cascade extraction) + disk file; not allowed for `SAVED` (`409`).
 - Frontend `#/review/:id` loads review DTO + categories and previews via authenticated blob URL.
+- Line items are not persisted or shown in the UI in this milestone (`ExtractionResult.lineItems` stays empty).
 
 ### 6.4 Status model
 
@@ -429,7 +464,7 @@ stateDiagram-v2
 
 - `expense_date` present  
 - `total_amount` > 0  
-- `currency` in `{EUR, USD, GBP}`  
+- `currency` = `EUR`  
 - `category_id` → active category  
 - Owner via `documents.user_id`  
 
@@ -509,7 +544,7 @@ sequenceDiagram
 
 ## 8. Data model
 
-PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/`. Seeded categories: `db/migrations/002_seed_categories.sql` (Food & Drink, Transport, Shopping, Housing, Health, Entertainment, Utilities, Travel, Education, Other).
+PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`001` schema, `002` category seed, `003` EUR-only currency checks). Seeded categories: `db/migrations/002_seed_categories.sql` (Food & Drink, Transport, Shopping, Housing, Health, Entertainment, Utilities, Travel, Education, Other).
 
 ### Table responsibilities
 
@@ -547,7 +582,7 @@ erDiagram
 
 - Unique email, category name/slug; at most one extraction and one expense per document.
 - Hard-deleting a document cascades its extraction; expense FK to document is `ON DELETE RESTRICT`.
-- Amount and file size checks; currency allowlist when set.
+- Amount and file size checks; currency must be `EUR` when set (`003_currency_eur_only.sql`).
 
 ### Application rules (summary)
 
@@ -566,20 +601,22 @@ Column-level detail lives in `001_create_mvp_schema.sql` and the ER diagram sour
 
 Still open until the relevant phase:
 
-- Digital-only PDF vs scanned PDF support depth.
-- Which OCR engine / AI extraction approach replaces the mock.
 - How long to keep raw OCR text.
-- Retry limits and timeouts.
+- Retry limits and timeouts for sync OCR + LLM (raise Spring / Vite proxy timeouts when the sidecar and Grok are wired).
 - Whether field-level confidence scores are needed after MVP.
 - Exact category labels may still be refined (slugs should stay stable).
+- Async job queue / polling UI (pipeline is already a single `extract()` so a worker can call it later).
+- Local LLM as a second `ReceiptParser` (swap without touching `DocumentService`).
 
 Already decided:
 
-- Sync processing in the upload request (mock today).
+- Sync processing in the upload / process request.
 - Manual-continue creates/clears an **empty** `document_extractions` row.
 - File bytes via `GET /documents/{id}/file`; review DTO includes `fileUrl`.
 - Upload MIME/size and `{UPLOAD_DIR}/{userId}/{uuid}{ext}` layout.
-- Currencies `EUR` / `USD` / `GBP`; hard delete only; no `users.role` / no `expenses.user_id`.
+- Currency **EUR only**; hard delete only; no `users.role` / no `expenses.user_id`.
+- Extraction stack: PDFBox for digital PDFs; RapidOCR sidecar for photos/scans; Grok JSON parse on text only; Java validation after parse. LLM is the semantic parser every time (not a fallback). No vision-LLM on JPEGs; no second OCR engine; no line-item tables/UI in this milestone.
+- Mock filename hook removed; `PROCESSING_FAILED` comes from real empty text or infrastructure/parse failures.
 
 ---
 
@@ -598,6 +635,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-17 | Header extraction docs: `ExtractionPipeline` + `document.extraction` (PDFBox router); EUR-only; mock removed; diagrams `extraction-pipeline.mmd` / `extraction-classes.mmd`; Flow B and package map updated; OCR sidecar + Grok noted as remaining wiring. |
 | 2026-09-16 | Step 13: expense filters (`from`/`to`/`categoryId`/`merchant`); `PUT`/`DELETE` expenses (edit + unapprove); `GET /dashboard` aggregates only; `GET /documents?status=pending` inbox; UI routes `#/dashboard`, `#/documents`; Flow C contract (unapprove vs forever wipe; no recent-list widgets). |
 | 2026-09-11 | Step 12: `GET /expenses`, `GET /expenses/{id}` (`ExpenseViewResponse`); list/details UI; approve navigates to `#/expenses`; Flow C current contract. |
 | 2026-09-11 | Step 11: `POST /documents/{id}/approve` — atomic `expenses` insert + `SAVED`; `expense` package + review Approve UI; extraction left as history. |
