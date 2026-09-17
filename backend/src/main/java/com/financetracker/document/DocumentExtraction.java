@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 /**
  * Main Responsibility: JPA entity mapped to the "document_extractions" table.
  *
- * Holds OCR/mock proposed expense fields for one document (1:1 via document_id).
+ * Holds OCR/LLM proposed expense fields for one document (1:1 via document_id).
  * Schema is owned by SQL migrations (ddl-auto=none); this class only maps columns.
  * created_at / updated_at are set by JPA lifecycle callbacks, not by callers.
  */

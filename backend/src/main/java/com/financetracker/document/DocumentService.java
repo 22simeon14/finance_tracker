@@ -1,5 +1,7 @@
 package com.financetracker.document;
 
+import com.financetracker.document.extraction.ExtractionPipeline;
+import com.financetracker.document.extraction.ExtractionResult;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -7,16 +9,16 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /**
- * Main Responsibility: Validate uploads, run mock processing, and serve owner-scoped documents.
+ * Main Responsibility: Validate uploads, run extraction, and serve owner-scoped documents.
  *
  * Owns file rules, storage write order, status transitions (UPLOADED → PROCESSING →
  * REVIEW_REQUIRED / PROCESSING_FAILED), pending inbox list, review GET / file stream /
  * pending DELETE, and cleanup when the DB save fails after the file is already on disk.
- * Keeps the controller thin.
+ * Extraction itself is delegated to ExtractionPipeline; this class maps results to
+ * document_extractions and never creates expenses.
  */
 @Service
 public class DocumentService {
@@ -36,22 +38,22 @@ public class DocumentService {
     private final DocumentRepository documentRepository;
     private final DocumentExtractionRepository documentExtractionRepository;
     private final FileStorageService fileStorageService;
-    private final MockExtractionService mockExtractionService;
+    private final ExtractionPipeline extractionPipeline;
 
     public DocumentService(
             DocumentRepository documentRepository,
             DocumentExtractionRepository documentExtractionRepository,
             FileStorageService fileStorageService,
-            MockExtractionService mockExtractionService
+            ExtractionPipeline extractionPipeline
     ) {
         this.documentRepository = documentRepository;
         this.documentExtractionRepository = documentExtractionRepository;
         this.fileStorageService = fileStorageService;
-        this.mockExtractionService = mockExtractionService;
+        this.extractionPipeline = extractionPipeline;
     }
 
     /**
-     * Validate the multipart file, store it on disk, create the DB row, then run mock processing
+     * Validate the multipart file, store it on disk, create the DB row, then run extraction
      * in the same request so the response status is already post-processing.
      */
     public DocumentReviewResponse uploadDocument(Long userId, MultipartFile file) {
@@ -84,7 +86,7 @@ public class DocumentService {
         // File + UPLOADED row exist. Never delete the file from here — prefer a recoverable
         // PROCESSING_FAILED document (and always return its id) over a silent disk orphan.
         try {
-            runMockProcessing(savedDocument);
+            runExtraction(savedDocument);
         } catch (RuntimeException processingException) {
             savedDocument = recoverAfterProcessingFailure(savedDocument, processingException);
         }
@@ -92,7 +94,7 @@ public class DocumentService {
     }
 
     /**
-     * Re-run mock processing. Allowed only from UPLOADED or PROCESSING_FAILED.
+     * Re-run extraction. Allowed only from UPLOADED or PROCESSING_FAILED.
      * Wrong owner → 404; illegal status → 409.
      */
     public DocumentReviewResponse process(Long userId, Long documentId) {
@@ -107,7 +109,7 @@ public class DocumentService {
         }
 
         try {
-            runMockProcessing(document);
+            runExtraction(document);
         } catch (RuntimeException processingException) {
             document = recoverAfterProcessingFailure(document, processingException);
         }
@@ -135,7 +137,7 @@ public class DocumentService {
                     created.setDocumentId(document.getId());
                     return created;
                 });
-        mockExtractionService.clearProposedFields(extraction);
+        clearProposedFields(extraction);
         documentExtractionRepository.save(extraction);
 
         document.setStatus(STATUS_REVIEW_REQUIRED);
@@ -202,16 +204,19 @@ public class DocumentService {
     }
 
     /**
-     * Set PROCESSING, then either fail (filename contains "fail") or upsert mock extraction
-     * and set REVIEW_REQUIRED. Unexpected errors mark PROCESSING_FAILED so the row stays recoverable.
-     * The PROCESSING status save is inside the try so a DB failure there is also recoverable.
+     * Set PROCESSING, run ExtractionPipeline on the stored file, then REVIEW_REQUIRED
+     * when any header is usable, otherwise PROCESSING_FAILED.
+     * Hard pipeline failures (OCR/LLM down, missing collaborators) also end as PROCESSING_FAILED.
      */
-    private void runMockProcessing(Document document) {
+    private void runExtraction(Document document) {
         try {
             document.setStatus(STATUS_PROCESSING);
             documentRepository.save(document);
 
-            if (shouldSimulateFailure(document.getOriginalFilename())) {
+            Path storedFile = fileStorageService.readStoredFile(document.getStoragePath());
+            ExtractionResult result = extractionPipeline.extract(storedFile, document.getMimeType());
+
+            if (!result.hasUsableHeader()) {
                 clearExtractionIfPresent(document.getId());
                 document.setStatus(STATUS_PROCESSING_FAILED);
                 documentRepository.save(document);
@@ -225,13 +230,14 @@ public class DocumentService {
                         created.setDocumentId(document.getId());
                         return created;
                     });
-            mockExtractionService.applyMockProposal(extraction);
+            applyExtractionResult(extraction, result);
             documentExtractionRepository.save(extraction);
 
             document.setStatus(STATUS_REVIEW_REQUIRED);
             documentRepository.save(document);
         } catch (RuntimeException exception) {
-            // Prefer a recoverable PROCESSING_FAILED row over failing the whole upload/retry.
+            // Prefer a recoverable PROCESSING_FAILED row over failing the whole upload/retry
+            // (includes ExtractionException, missing file, and unexpected errors).
             try {
                 markProcessingFailed(document);
             } catch (RuntimeException saveFailed) {
@@ -239,6 +245,26 @@ public class DocumentService {
                 throw exception;
             }
         }
+    }
+
+    /** Copy validated header fields onto the extraction entity (line items ignored). */
+    private static void applyExtractionResult(DocumentExtraction extraction, ExtractionResult result) {
+        extraction.setRawOcrText(result.rawOcrText());
+        extraction.setProposedMerchant(result.merchant());
+        extraction.setProposedDate(result.date());
+        extraction.setProposedAmount(result.totalAmount());
+        extraction.setProposedCurrency(result.currency());
+        extraction.setProposedCategoryId(result.categoryId());
+    }
+
+    /** Clear all proposed fields (manual-continue empty form / failed cleanup). */
+    private static void clearProposedFields(DocumentExtraction extraction) {
+        extraction.setRawOcrText(null);
+        extraction.setProposedMerchant(null);
+        extraction.setProposedDate(null);
+        extraction.setProposedAmount(null);
+        extraction.setProposedCurrency(null);
+        extraction.setProposedCategoryId(null);
     }
 
     /**
@@ -261,17 +287,9 @@ public class DocumentService {
         documentRepository.save(document);
     }
 
-    /** Filename marker for local testing of the failed-processing path (case-insensitive). */
-    private static boolean shouldSimulateFailure(String originalFilename) {
-        if (originalFilename == null) {
-            return false;
-        }
-        return originalFilename.toLowerCase(Locale.ROOT).contains("fail");
-    }
-
     private void clearExtractionIfPresent(Long documentId) {
         documentExtractionRepository.findByDocumentId(documentId).ifPresent(extraction -> {
-            mockExtractionService.clearProposedFields(extraction);
+            clearProposedFields(extraction);
             documentExtractionRepository.save(extraction);
         });
     }

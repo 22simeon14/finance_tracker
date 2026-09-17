@@ -51,3 +51,6 @@
     writing to the DB, persist it in sessionStorage (survives refresh, dies with
     the tab) or localStorage (survives refresh and browser restart). Clear the
     draft after a successful Save or Unapprove.
+13. Later UI idea: click a line item → highlight/outline that text on the receipt
+    image using OCR bounding boxes (bbox). Needs saved line geometry, not just
+    header text. Out of current MVP.
