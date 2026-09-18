@@ -6,7 +6,7 @@ import java.nio.file.Path;
  * Main Responsibility: Turn a stored PDF or image into OcrResult text (and lines).
  *
  * Routes by MIME: digital PDF text when usable, otherwise rasterize/OCR;
- * JPEG/PNG go straight to the OCR sidecar. Implemented in later pipeline steps.
+ * JPEG/PNG go straight to the OCR sidecar (DefaultDocumentTextGateway).
  */
 public interface DocumentTextGateway {
 

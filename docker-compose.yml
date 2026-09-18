@@ -1,6 +1,7 @@
 # Main Responsibility: Local multi-container setup (Postgres + backend).
 # Postgres mounts ./db/migrations into docker-entrypoint-initdb.d (runs on first start only).
 # Backend waits until Postgres is healthy before starting.
+# Next step (decided): add an internal RapidOCR service; do not publish its port.
 
 services:
   postgres:
