@@ -5,6 +5,8 @@
  * /expenses, and /dashboard are proxied to the Spring backend on localhost:8080
  * so the browser can call same-origin URLs (no CORS issues during local development).
  *
+ * Tailwind CSS is compiled through PostCSS (postcss.config.js + tailwind.config.js).
+ *
  * Note: package.json cannot hold comments; this file documents the frontend setup.
  */
 import { defineConfig } from 'vite';
