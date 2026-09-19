@@ -1,7 +1,6 @@
-# Main Responsibility: Local multi-container setup (Postgres + backend).
+# Main Responsibility: Local multi-container setup (Postgres + OCR sidecar + backend).
 # Postgres mounts ./db/migrations into docker-entrypoint-initdb.d (runs on first start only).
-# Backend waits until Postgres is healthy before starting.
-# Next step (decided): add an internal RapidOCR service; do not publish its port.
+# OCR is internal-only (no host port). Backend waits for Postgres + OCR healthy before starting.
 
 services:
   postgres:
@@ -24,6 +23,24 @@ services:
       timeout: 5s
       retries: 5
 
+  ocr:
+    build: ./ocr
+    container_name: finance_tracker_ocr
+    # No ports: section — reachable only on the Compose network as http://ocr:8080.
+    healthcheck:
+      # Models load at startup; fail until /health returns 200.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
   backend:
     build: ./backend
     container_name: finance_tracker_backend
@@ -35,11 +52,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       UPLOAD_DIR: ${UPLOAD_DIR}
+      OCR_BASE_URL: ${OCR_BASE_URL:-http://ocr:8080}
     volumes:
       # Persist uploaded files across backend container restarts.
       - uploads_data:${UPLOAD_DIR}
     depends_on:
       postgres:
+        condition: service_healthy
+      ocr:
         condition: service_healthy
 
 volumes:

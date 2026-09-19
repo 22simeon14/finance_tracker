@@ -16,9 +16,9 @@ Start with `docs/architecture.md` if you are new to the repo.
 - Database: PostgreSQL (Docker) + SQL migrations in `db/migrations/` (currency **EUR only** after `003`)
 - Persistence: Spring Data JPA (Hibernate), with schema controlled by SQL migrations
 - Frontend: Vite + plain JavaScript (hash routing + `fetch`), register/login UI with JWT in the browser
-- Document text: Apache PDFBox for digital PDFs; RapidOCR sidecar + Grok text parse (wiring in progress)
+- Document text: Apache PDFBox for digital PDFs; RapidOCR sidecar + Grok text parse (Grok wiring in progress)
 - File uploads: local Docker volume
-- Local orchestration: Docker Compose (Postgres + backend today; OCR sidecar next)
+- Local orchestration: Docker Compose (Postgres + RapidOCR sidecar + backend)
 
 ## Prerequisites
 - Docker
@@ -33,11 +33,13 @@ Start with `docs/architecture.md` if you are new to the repo.
 Copy-Item .env.example .env
 ```
 
-2. Start PostgreSQL and backend (from repository root):
+2. Start PostgreSQL, OCR sidecar, and backend (from repository root):
 
 ```powershell
 docker compose up --build
 ```
+
+First OCR image build downloads ONNX models and can take several minutes. The OCR port is not published; only the backend reaches it via `OCR_BASE_URL`.
 
 3. In a second terminal, start the frontend dev server on the host:
 

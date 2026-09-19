@@ -60,7 +60,7 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 - One application role: `USER`.
 - Upload of supported image and PDF files.
 - Secure association of every document and expense with its owner.
-- Text extraction from digital PDFs (PDFBox) and from images/scans (OCR sidecar — wiring in progress).
+- Text extraction from digital PDFs (PDFBox) and from images/scans (RapidOCR sidecar).
 - Extraction of merchant, date, total amount, currency (**EUR only**), and category.
 - Review and correction before final saving.
 - Manual entry when automatic extraction is incomplete or fails.
@@ -98,7 +98,7 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 | Persistence | Spring Data JPA; schema owned by SQL in `db/migrations/` (`ddl-auto=none`) |
 | Database | PostgreSQL 16 |
 | PDF text | Apache PDFBox (digital text layer + page rasterize for scans) |
-| OCR | RapidOCR sidecar (HTTP) — decided; Compose/client wiring in progress |
+| OCR | RapidOCR sidecar (HTTP, Compose `ocr` service; Java `HttpOcrClient`) |
 | Receipt parse | LLM on **text only** (Grok / xAI) — decided; client wiring in progress |
 | Frontend | Vite + plain JavaScript (hash routing + `fetch`) |
 | Files | Local disk under `UPLOAD_DIR` (Docker volume in Compose) |
@@ -122,10 +122,10 @@ flowchart LR
     API --> Disk
 ```
 
-- **Compose today** (`docker-compose.yml`): `postgres` + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created). Apply later migrations (for example `003_currency_eur_only.sql`) once with `psql` — see [`db/README.md`](../db/README.md).
-- **Next Compose step (decided):** add an internal `ocr` service (RapidOCR). Backend will call it via `OCR_BASE_URL` (not published to the host). Images stay on our disk; the LLM receives text only.
+- **Compose today** (`docker-compose.yml`): `postgres` + internal `ocr` (RapidOCR) + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created). Apply later migrations (for example `003_currency_eur_only.sql`) once with `psql` — see [`db/README.md`](../db/README.md).
+- Backend calls OCR via `OCR_BASE_URL` (default `http://ocr:8080`; port not published to the host). Images stay on our disk; the LLM receives text only.
 - **Frontend** is not in Compose: `cd frontend && npm run dev`.
-- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL. Planned: `OCR_BASE_URL`, `GROK_API_KEY`, `GROK_API_BASE_URL`, `GROK_MODEL`.
+- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL, `OCR_BASE_URL`. Planned: `GROK_API_KEY`, `GROK_API_BASE_URL`, `GROK_MODEL`.
 
 How requests move:
 
@@ -389,7 +389,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd), [extraction-classes.mmd](diagrams/extraction-classes.mmd).
 
-**Implementation status:** PDFBox digital-text path and rasterize fallback are in the backend. OCR sidecar HTTP client, Compose `ocr` service, and Grok `ReceiptParser` bean are the remaining wiring steps. Until those beans are present, processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
+**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, and `HttpOcrClient` are in place. Grok `ReceiptParser` bean is the remaining wiring step. Until that bean is present, processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → `ExtractionPipeline` → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 

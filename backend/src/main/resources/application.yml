@@ -1,4 +1,4 @@
-# Main Responsibility: Spring Boot runtime settings (DB, server port, JWT).
+# Main Responsibility: Spring Boot runtime settings (DB, server port, JWT, OCR sidecar).
 # Secrets and host-specific values come from environment variables / .env.
 
 spring:
@@ -30,3 +30,8 @@ app:
   upload:
     # Base folder for local document uploads. Docker/.env provides the real path.
     dir: ${UPLOAD_DIR}
+  ocr:
+    # RapidOCR sidecar base URL (Compose: http://ocr:8080). Empty → HttpOcrClient bean off.
+    base-url: ${OCR_BASE_URL:}
+    # Read timeout for POST /ocr (~30s per the extraction plan).
+    timeout-ms: ${OCR_TIMEOUT_MS:30000}
