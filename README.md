@@ -41,7 +41,7 @@ docker compose up --build
 
 First OCR image build downloads ONNX models and can take several minutes. The OCR port is not published; only the backend reaches it via `OCR_BASE_URL`.
 
-For receipt LLM parsing (next step), set `GROQ_API_KEY` in `.env` (free key from [console.groq.com](https://console.groq.com)). Without it, processing fails hard once the Groq parser bean is wired.
+For receipt LLM parsing, set `GROQ_API_KEY` in `.env` (free key from [console.groq.com](https://console.groq.com)). Without it, `GroqReceiptParser` is not created and processing fails hard into `PROCESSING_FAILED`.
 
 3. In a second terminal, start the frontend dev server on the host:
 

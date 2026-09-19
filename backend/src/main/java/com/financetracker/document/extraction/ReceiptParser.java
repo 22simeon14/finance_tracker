@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Main Responsibility: Parse OCR text into header ExtractionResult via an LLM.
  *
- * Always the semantic parser (not a rules fallback). Production bean (next):
+ * Always the semantic parser (not a rules fallback). Production bean:
  * GroqReceiptParser — Groq Cloud chat API (OpenAI-compatible HTTP shape; not OpenAI
  * and not xAI Grok). Implementations map category by slug against the given active
  * options; unknown slug → null category.

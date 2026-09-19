@@ -389,7 +389,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd), [extraction-classes.mmd](diagrams/extraction-classes.mmd).
 
-**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, and `HttpOcrClient` are in place. Groq `ReceiptParser` bean is the remaining wiring step (not xAI Grok). Until that bean is present, processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
+**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, `HttpOcrClient`, and `GroqReceiptParser` (OpenAI-compatible chat completions on text only; not xAI Grok) are in place. Missing `GROQ_API_KEY` / OCR URL leaves those beans off and processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → `ExtractionPipeline` → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 

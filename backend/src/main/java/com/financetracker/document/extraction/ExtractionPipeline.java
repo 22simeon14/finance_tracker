@@ -11,9 +11,9 @@ import java.util.List;
 /**
  * Main Responsibility: Run text extract → LLM parse → validate for one stored file.
  *
- * Single entry point for DocumentService (and a future async worker). Collaborator
- * beans: DocumentTextGateway + OcrClient are wired; ReceiptParser (Groq) is next.
- * Until the parser bean exists, extract fails hard instead of returning mock success.
+ * Single entry point for DocumentService (and a future async worker). Collaborators:
+ * DocumentTextGateway, OcrClient, ReceiptParser (GroqReceiptParser when GROQ_API_KEY
+ * is set). Missing gateway or parser → ExtractionException (PROCESSING_FAILED).
  */
 @Service
 public class ExtractionPipeline {

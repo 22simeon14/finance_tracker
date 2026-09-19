@@ -30,7 +30,7 @@ flowchart TB
   Impl --> Merger
 
   Parser[ReceiptParser]
-  %% GroqReceiptParser is the planned production bean (Groq Cloud, OpenAI-compatible HTTP).
+  %% GroqReceiptParser is the production bean (Groq Cloud, OpenAI-compatible HTTP).
   %% Swap later for Ollama / another provider without touching DocumentService.
 
   OcrResult[OcrResult + OcrLine]
