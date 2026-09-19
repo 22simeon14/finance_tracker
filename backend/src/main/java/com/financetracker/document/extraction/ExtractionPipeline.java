@@ -12,8 +12,8 @@ import java.util.List;
  * Main Responsibility: Run text extract → LLM parse → validate for one stored file.
  *
  * Single entry point for DocumentService (and a future async worker). Collaborator
- * beans (DocumentTextGateway, ReceiptParser) are registered by later steps; until
- * they exist, extract fails hard instead of returning mock success.
+ * beans: DocumentTextGateway + OcrClient are wired; ReceiptParser (Groq) is next.
+ * Until the parser bean exists, extract fails hard instead of returning mock success.
  */
 @Service
 public class ExtractionPipeline {

@@ -99,7 +99,7 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 | Database | PostgreSQL 16 |
 | PDF text | Apache PDFBox (digital text layer + page rasterize for scans) |
 | OCR | RapidOCR sidecar (HTTP, Compose `ocr` service; Java `HttpOcrClient`) |
-| Receipt parse | LLM on **text only** (Grok / xAI) — decided; client wiring in progress |
+| Receipt parse | LLM on **text only** via **Groq Cloud** (`llama-3.3-70b-versatile` default; OpenAI-compatible HTTP) — client wiring next |
 | Frontend | Vite + plain JavaScript (hash routing + `fetch`) |
 | Files | Local disk under `UPLOAD_DIR` (Docker volume in Compose) |
 | Currency | **EUR only** (column kept; UI submits `EUR`) |
@@ -125,7 +125,7 @@ flowchart LR
 - **Compose today** (`docker-compose.yml`): `postgres` + internal `ocr` (RapidOCR) + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created). Apply later migrations (for example `003_currency_eur_only.sql`) once with `psql` — see [`db/README.md`](../db/README.md).
 - Backend calls OCR via `OCR_BASE_URL` (default `http://ocr:8080`; port not published to the host). Images stay on our disk; the LLM receives text only.
 - **Frontend** is not in Compose: `cd frontend && npm run dev`.
-- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL, `OCR_BASE_URL`. Planned: `GROK_API_KEY`, `GROK_API_BASE_URL`, `GROK_MODEL`.
+- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL, `OCR_BASE_URL`, `GROQ_API_KEY`, `GROQ_API_BASE_URL`, `GROQ_MODEL`.
 
 How requests move:
 
@@ -389,7 +389,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd), [extraction-classes.mmd](diagrams/extraction-classes.mmd).
 
-**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, and `HttpOcrClient` are in place. Grok `ReceiptParser` bean is the remaining wiring step. Until that bean is present, processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
+**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, and `HttpOcrClient` are in place. Groq `ReceiptParser` bean is the remaining wiring step (not xAI Grok). Until that bean is present, processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → `ExtractionPipeline` → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 
@@ -602,11 +602,11 @@ Column-level detail lives in `001_create_mvp_schema.sql` and the ER diagram sour
 Still open until the relevant phase:
 
 - How long to keep raw OCR text.
-- Retry limits and timeouts for sync OCR + LLM (raise Spring / Vite proxy timeouts when the sidecar and Grok are wired).
+- Retry limits and timeouts for sync OCR + LLM (raise Spring / Vite proxy timeouts when the sidecar and Groq are wired).
 - Whether field-level confidence scores are needed after MVP.
 - Exact category labels may still be refined (slugs should stay stable).
 - Async job queue / polling UI (pipeline is already a single `extract()` so a worker can call it later).
-- Local LLM as a second `ReceiptParser` (swap without touching `DocumentService`).
+- Local LLM (Ollama) as a second `ReceiptParser` (swap without touching `DocumentService`).
 
 Already decided:
 
@@ -615,7 +615,7 @@ Already decided:
 - File bytes via `GET /documents/{id}/file`; review DTO includes `fileUrl`.
 - Upload MIME/size and `{UPLOAD_DIR}/{userId}/{uuid}{ext}` layout.
 - Currency **EUR only**; hard delete only; no `users.role` / no `expenses.user_id`.
-- Extraction stack: PDFBox for digital PDFs; RapidOCR sidecar for photos/scans; Grok JSON parse on text only; Java validation after parse. LLM is the semantic parser every time (not a fallback). No vision-LLM on JPEGs; no second OCR engine; no line-item tables/UI in this milestone.
+- Extraction stack: PDFBox for digital PDFs; RapidOCR sidecar for photos/scans; **Groq** JSON parse on text only (OpenAI-compatible chat API at `api.groq.com`; not xAI Grok); Java validation after parse. LLM is the semantic parser every time (not a fallback). No vision-LLM on JPEGs; no second OCR engine; no line-item tables/UI in this milestone.
 - Mock filename hook removed; `PROCESSING_FAILED` comes from real empty text or infrastructure/parse failures.
 
 ---
@@ -635,6 +635,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-19 | LLM provider decision: **Groq Cloud** (free-tier API) instead of xAI Grok; env `GROQ_*`; production bean name `GroqReceiptParser`. |
 | 2026-09-17 | Header extraction docs: `ExtractionPipeline` + `document.extraction` (PDFBox router); EUR-only; mock removed; diagrams `extraction-pipeline.mmd` / `extraction-classes.mmd`; Flow B and package map updated; OCR sidecar + Grok noted as remaining wiring. |
 | 2026-09-16 | Step 13: expense filters (`from`/`to`/`categoryId`/`merchant`); `PUT`/`DELETE` expenses (edit + unapprove); `GET /dashboard` aggregates only; `GET /documents?status=pending` inbox; UI routes `#/dashboard`, `#/documents`; Flow C contract (unapprove vs forever wipe; no recent-list widgets). |
 | 2026-09-11 | Step 12: `GET /expenses`, `GET /expenses/{id}` (`ExpenseViewResponse`); list/details UI; approve navigates to `#/expenses`; Flow C current contract. |

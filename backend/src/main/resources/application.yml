@@ -1,4 +1,4 @@
-# Main Responsibility: Spring Boot runtime settings (DB, server port, JWT, OCR sidecar).
+# Main Responsibility: Spring Boot runtime settings (DB, server port, JWT, OCR, Groq LLM).
 # Secrets and host-specific values come from environment variables / .env.
 
 spring:
@@ -35,3 +35,10 @@ app:
     base-url: ${OCR_BASE_URL:}
     # Read timeout for POST /ocr (~30s per the extraction plan).
     timeout-ms: ${OCR_TIMEOUT_MS:30000}
+  groq:
+    # Groq Cloud chat API (OpenAI-compatible path). Empty key → GroqReceiptParser bean off.
+    api-key: ${GROQ_API_KEY:}
+    api-base-url: ${GROQ_API_BASE_URL:https://api.groq.com/openai/v1}
+    model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+    # Read timeout for chat completions (~20s per the extraction plan).
+    timeout-ms: ${GROQ_TIMEOUT_MS:20000}
