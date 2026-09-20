@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-09-17  
+> **Last updated:** 2026-09-20  
 > This document records accepted decisions and how the system is built. Detail diagrams live under [`diagrams/`](diagrams/).
 
 ## Contents
@@ -99,11 +99,11 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 | Database | PostgreSQL 16 |
 | PDF text | Apache PDFBox (digital text layer + page rasterize for scans) |
 | OCR | RapidOCR sidecar (HTTP, Compose `ocr` service; Java `HttpOcrClient`) |
-| Receipt parse | LLM on **text only** via **Groq Cloud** (`llama-3.3-70b-versatile` default; OpenAI-compatible HTTP) — client wiring next |
+| Receipt parse | LLM on **text only** via **Groq Cloud** (`llama-3.3-70b-versatile` default; OpenAI-compatible HTTP; `GroqReceiptParser`) |
 | Frontend | Vite + plain JavaScript (hash routing + `fetch`) |
 | Files | Local disk under `UPLOAD_DIR` (Docker volume in Compose) |
 | Currency | **EUR only** (column kept; UI submits `EUR`) |
-| Local run | Docker Compose for Postgres + backend; frontend on the host |
+| Local run | Docker Compose for Postgres + OCR sidecar + backend; frontend on the host |
 
 ### 4.2 Deployment (local)
 
@@ -113,19 +113,22 @@ flowchart LR
     Vite["Vite dev server<br/>proxy /auth /documents /expenses /dashboard …"]
     API["Spring Boot<br/>localhost:8080"]
     PG["PostgreSQL<br/>localhost:5432"]
+    OCR["RapidOCR sidecar<br/>ocr:8080 internal"]
     Disk["Upload volume<br/>UPLOAD_DIR"]
 
     Browser --> Vite
-    Vite -->|"same-origin proxy"| API
+    Vite -->|"same-origin proxy<br/>/documents ≤120s"| API
     Browser -.->|"optional direct / CORS"| API
     API --> PG
+    API --> OCR
     API --> Disk
 ```
 
 - **Compose today** (`docker-compose.yml`): `postgres` + internal `ocr` (RapidOCR) + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created). Apply later migrations (for example `003_currency_eur_only.sql`) once with `psql` — see [`db/README.md`](../db/README.md).
 - Backend calls OCR via `OCR_BASE_URL` (default `http://ocr:8080`; port not published to the host). Images stay on our disk; the LLM receives text only.
+- **Timeouts (sync processing):** OCR HTTP read ~30s (`OCR_TIMEOUT_MS`); Groq chat ~20s (`GROQ_TIMEOUT_MS`); Tomcat `connection-timeout` 120s; Vite `/documents` proxy 120s. Processing can take several seconds end-to-end.
 - **Frontend** is not in Compose: `cd frontend && npm run dev`.
-- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL, `OCR_BASE_URL`, `GROQ_API_KEY`, `GROQ_API_BASE_URL`, `GROQ_MODEL`.
+- Env values come from `.env` (see `.env.example`): DB credentials, `JWT_SECRET`, `UPLOAD_DIR`, JDBC URL, `OCR_BASE_URL`, `OCR_TIMEOUT_MS`, `GROQ_API_KEY`, `GROQ_API_BASE_URL`, `GROQ_MODEL`, `GROQ_TIMEOUT_MS`.
 
 How requests move:
 
@@ -246,7 +249,7 @@ flowchart TB
 | `pages/expense-detail.js` | Detail + edit (`PUT`) + unapprove (`DELETE`); preview via `apiBlob`; after unapprove → `#/expenses` |
 | `pages/dashboard.js` | Aggregates only (`GET /dashboard`); optional `from`/`to`; no recent-list widgets |
 | `pages/documents.js` | Pending inbox (`GET /documents?status=pending`); open review; forever-delete |
-| `vite.config.js` | Dev server `:5173` + API proxy (`/auth`, `/documents`, `/expenses`, `/dashboard`, …) |
+| `vite.config.js` | Dev server `:5173` + API proxy (`/auth`, `/documents` 120s timeout, `/expenses`, `/dashboard`, …) |
 
 | Hash route | Page |
 | ---------- | ---- |
@@ -389,7 +392,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd), [extraction-classes.mmd](diagrams/extraction-classes.mmd).
 
-**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, `HttpOcrClient`, and `GroqReceiptParser` (OpenAI-compatible chat completions on text only; not xAI Grok) are in place. Missing `GROQ_API_KEY` / OCR URL leaves those beans off and processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
+**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, `HttpOcrClient`, and `GroqReceiptParser` (OpenAI-compatible chat completions on text only; not xAI Grok) are in place. Sync request budgets: OCR ~30s, Groq ~20s, Spring Tomcat + Vite `/documents` proxy ~120s. Missing `GROQ_API_KEY` / OCR URL leaves those beans off and processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → `ExtractionPipeline` → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 
@@ -602,7 +605,6 @@ Column-level detail lives in `001_create_mvp_schema.sql` and the ER diagram sour
 Still open until the relevant phase:
 
 - How long to keep raw OCR text.
-- Retry limits and timeouts for sync OCR + LLM (raise Spring / Vite proxy timeouts when the sidecar and Groq are wired).
 - Whether field-level confidence scores are needed after MVP.
 - Exact category labels may still be refined (slugs should stay stable).
 - Async job queue / polling UI (pipeline is already a single `extract()` so a worker can call it later).
@@ -611,6 +613,7 @@ Still open until the relevant phase:
 Already decided:
 
 - Sync processing in the upload / process request.
+- Sync OCR + LLM timeouts: OCR ~30s, Groq ~20s; raise Spring Tomcat connection-timeout and Vite `/documents` proxy to ~120s for the sync milestone.
 - Manual-continue creates/clears an **empty** `document_extractions` row.
 - File bytes via `GET /documents/{id}/file`; review DTO includes `fileUrl`.
 - Upload MIME/size and `{UPLOAD_DIR}/{userId}/{uuid}{ext}` layout.
@@ -635,6 +638,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-20 | Sync OCR+LLM timeouts documented and wired (OCR 30s, Groq 20s, Tomcat + Vite `/documents` 120s); README / `.env.example` note three Compose services + `GROQ_API_KEY`; unit tests with fakes for validator + pipeline. |
 | 2026-09-19 | LLM provider decision: **Groq Cloud** (free-tier API) instead of xAI Grok; env `GROQ_*`; production bean name `GroqReceiptParser`. |
 | 2026-09-17 | Header extraction docs: `ExtractionPipeline` + `document.extraction` (PDFBox router); EUR-only; mock removed; diagrams `extraction-pipeline.mmd` / `extraction-classes.mmd`; Flow B and package map updated; OCR sidecar + Grok noted as remaining wiring. |
 | 2026-09-16 | Step 13: expense filters (`from`/`to`/`categoryId`/`merchant`); `PUT`/`DELETE` expenses (edit + unapprove); `GET /dashboard` aggregates only; `GET /documents?status=pending` inbox; UI routes `#/dashboard`, `#/documents`; Flow C contract (unapprove vs forever wipe; no recent-list widgets). |

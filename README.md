@@ -16,9 +16,9 @@ Start with `docs/architecture.md` if you are new to the repo.
 - Database: PostgreSQL (Docker) + SQL migrations in `db/migrations/` (currency **EUR only** after `003`)
 - Persistence: Spring Data JPA (Hibernate), with schema controlled by SQL migrations
 - Frontend: Vite + plain JavaScript (hash routing + `fetch`), register/login UI with JWT in the browser
-- Document text: Apache PDFBox for digital PDFs; RapidOCR sidecar + Groq text parse (parser wiring next)
+- Document text: Apache PDFBox for digital PDFs; RapidOCR sidecar + Groq text-only header parse
 - File uploads: local Docker volume
-- Local orchestration: Docker Compose (Postgres + RapidOCR sidecar + backend)
+- Local orchestration: Docker Compose (**three services**: Postgres + RapidOCR sidecar + backend)
 
 ## Prerequisites
 - Docker
@@ -42,6 +42,8 @@ docker compose up --build
 First OCR image build downloads ONNX models and can take several minutes. The OCR port is not published; only the backend reaches it via `OCR_BASE_URL`.
 
 For receipt LLM parsing, set `GROQ_API_KEY` in `.env` (free key from [console.groq.com](https://console.groq.com)). Without it, `GroqReceiptParser` is not created and processing fails hard into `PROCESSING_FAILED`.
+
+Upload and retry (`POST /documents`, `POST /documents/{id}/process`) run OCR + Groq **synchronously** and can take **several seconds** (phone photos longer). OCR read timeout defaults to 30s, Groq to 20s; the Vite `/documents` proxy and Tomcat connection timeout allow up to ~120s so the browser is not cut off early.
 
 3. In a second terminal, start the frontend dev server on the host:
 

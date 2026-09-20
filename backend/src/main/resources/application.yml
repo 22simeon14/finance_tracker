@@ -21,6 +21,10 @@ spring:
 
 server:
   port: 8080
+  tomcat:
+    # Sync OCR (~30s) + Groq (~20s) can keep POST /documents open for ~60s;
+    # 120s leaves headroom for slow photos without hanging forever.
+    connection-timeout: 120s
 
 app:
   jwt:
