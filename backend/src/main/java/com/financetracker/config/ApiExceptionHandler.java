@@ -1,5 +1,7 @@
-package com.financetracker.auth;
+package com.financetracker.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -12,13 +14,16 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Main Responsibility: Turn auth-related exceptions into simple JSON error bodies.
+ * Main Responsibility: Map exceptions to the shared JSON error body contract.
  *
- * Validation errors include a "fields" map (field name → message).
- * ResponseStatusException becomes { "error": "reason" } with the matching HTTP status.
+ * Validation → { "error", "fields" }. ResponseStatusException → { "error": reason }.
+ * Unexpected failures → HTTP 500 with a generic message; details stay in server logs.
+ * Security filter-chain 401 JSON remains in SecurityConfig (not this advice).
  */
 @RestControllerAdvice
-public class AuthExceptionHandler {
+public class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
@@ -38,5 +43,17 @@ public class AuthExceptionHandler {
         Map<String, String> body = new HashMap<>();
         body.put("error", ex.getReason() != null ? ex.getReason() : ex.getStatusCode().toString());
         return ResponseEntity.status(ex.getStatusCode()).body(body);
+    }
+
+    /**
+     * Last resort so clients never get Spring's default HTML/JSON error page.
+     * Log the full stack server-side; never send exception text to the client.
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, String>> handleUnexpected(Exception ex) {
+        log.error("Unhandled exception: {}", ex.getMessage(), ex);
+        Map<String, String> body = new HashMap<>();
+        body.put("error", "Internal server error");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }
 }

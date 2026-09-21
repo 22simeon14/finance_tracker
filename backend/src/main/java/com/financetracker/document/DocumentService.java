@@ -2,6 +2,8 @@ package com.financetracker.document;
 
 import com.financetracker.document.extraction.ExtractionPipeline;
 import com.financetracker.document.extraction.ExtractionResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +24,8 @@ import java.util.Set;
  */
 @Service
 public class DocumentService {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentService.class);
 
     private static final Set<String> ALLOWED_MIME_TYPES = Set.of(
             "image/jpeg",
@@ -217,6 +221,11 @@ public class DocumentService {
             ExtractionResult result = extractionPipeline.extract(storedFile, document.getMimeType());
 
             if (!result.hasUsableHeader()) {
+                // No receipt dump — message only so Compose logs stay safe.
+                log.warn(
+                        "Document {} marked PROCESSING_FAILED: extraction returned no usable header",
+                        document.getId()
+                );
                 clearExtractionIfPresent(document.getId());
                 document.setStatus(STATUS_PROCESSING_FAILED);
                 documentRepository.save(document);
@@ -238,6 +247,13 @@ public class DocumentService {
         } catch (RuntimeException exception) {
             // Prefer a recoverable PROCESSING_FAILED row over failing the whole upload/retry
             // (includes ExtractionException, missing file, and unexpected errors).
+            // WARN with cause helps diagnose OCR/Groq failures in Compose logs without dumping receipt text.
+            log.warn(
+                    "Document extraction failed for documentId={}: {}",
+                    document.getId(),
+                    exception.getMessage(),
+                    exception
+            );
             try {
                 markProcessingFailed(document);
             } catch (RuntimeException saveFailed) {
