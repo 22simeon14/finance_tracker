@@ -275,6 +275,7 @@ class ApiIntegrationTest {
     /**
      * Tiny JSON field reader for test payloads (token / id). Avoids adding a JSON test library.
      * Expects a top-level string or number field like "token":"..." or "id":12.
+     * Fail loudly on malformed JSON so tests do not silently parse the wrong slice.
      */
     private static String readJsonField(MvcResult result, String field) throws Exception {
         String body = result.getResponse().getContentAsString();
@@ -284,6 +285,9 @@ class ApiIntegrationTest {
             throw new IllegalStateException("Field " + field + " not found in: " + body);
         }
         int colon = body.indexOf(':', keyIndex + quotedKey.length());
+        if (colon < 0) {
+            throw new IllegalStateException("Missing ':' after field " + field + " in: " + body);
+        }
         int valueStart = colon + 1;
         while (valueStart < body.length() && Character.isWhitespace(body.charAt(valueStart))) {
             valueStart++;
@@ -293,11 +297,22 @@ class ApiIntegrationTest {
         }
         if (body.charAt(valueStart) == '"') {
             int end = body.indexOf('"', valueStart + 1);
+            if (end < 0) {
+                throw new IllegalStateException("Unclosed string value for " + field + " in: " + body);
+            }
             return body.substring(valueStart + 1, end);
         }
+        // Optional leading minus, then digits only (ids / categoryId — not free-form numbers).
         int end = valueStart;
-        while (end < body.length() && (Character.isDigit(body.charAt(end)) || body.charAt(end) == '-')) {
+        if (end < body.length() && body.charAt(end) == '-') {
             end++;
+        }
+        int digitsStart = end;
+        while (end < body.length() && Character.isDigit(body.charAt(end))) {
+            end++;
+        }
+        if (end == digitsStart) {
+            throw new IllegalStateException("Expected number value for " + field + " in: " + body);
         }
         return body.substring(valueStart, end);
     }
