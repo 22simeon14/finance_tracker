@@ -43,6 +43,7 @@ app:
     # Groq Cloud chat API (OpenAI-compatible path). Empty key → GroqReceiptParser bean off.
     api-key: ${GROQ_API_KEY:}
     api-base-url: ${GROQ_API_BASE_URL:https://api.groq.com/openai/v1}
-    model: ${GROQ_MODEL:llama-3.3-70b-versatile}
+    # Default must be a currently available Groq model ID (llama-3.3-70b-versatile is deprecated).
+    model: ${GROQ_MODEL:openai/gpt-oss-120b}
     # Read timeout for chat completions (~20s per the extraction plan).
     timeout-ms: ${GROQ_TIMEOUT_MS:20000}

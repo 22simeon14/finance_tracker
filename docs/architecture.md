@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
 > **Status:** Working draft  
-> **Last updated:** 2026-09-20  
+> **Last updated:** 2026-09-21  
 > This document records accepted decisions and how the system is built. Detail diagrams live under [`diagrams/`](diagrams/).
 
 ## Contents
@@ -99,7 +99,7 @@ It is not accounting software. Receipts are evidence for personal expenses, not 
 | Database | PostgreSQL 16 |
 | PDF text | Apache PDFBox (digital text layer + page rasterize for scans) |
 | OCR | RapidOCR sidecar (HTTP, Compose `ocr` service; Java `HttpOcrClient`) |
-| Receipt parse | LLM on **text only** via **Groq Cloud** (`llama-3.3-70b-versatile` default; OpenAI-compatible HTTP; `GroqReceiptParser`) |
+| Receipt parse | LLM on **text only** via **Groq Cloud** (`openai/gpt-oss-120b` default; OpenAI-compatible HTTP; `GroqReceiptParser`) |
 | Frontend | Vite + plain JavaScript (hash routing + `fetch`) |
 | Files | Local disk under `UPLOAD_DIR` (Docker volume in Compose) |
 | Currency | **EUR only** (column kept; UI submits `EUR`) |
@@ -124,7 +124,7 @@ flowchart LR
     API --> Disk
 ```
 
-- **Compose today** (`docker-compose.yml`): `postgres` + internal `ocr` (RapidOCR) + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created). Apply later migrations (for example `003_currency_eur_only.sql`) once with `psql` — see [`db/README.md`](../db/README.md).
+- **Compose today** (`docker-compose.yml`): `postgres` + internal `ocr` (RapidOCR) + `backend`. Migrations mount into `docker-entrypoint-initdb.d` (run only when the Postgres volume is first created). Apply later migrations (for example `003_currency_eur_only.sql`) once with `psql` — see [`db/README.md`](../db/README.md). Preferred clone path: [`scripts/setup.ps1`](../scripts/setup.ps1) / [`scripts/setup.sh`](../scripts/setup.sh) (env copy, Compose up, health wait, `npm install`).
 - Backend calls OCR via `OCR_BASE_URL` (default `http://ocr:8080`; port not published to the host). Images stay on our disk; the LLM receives text only.
 - **Timeouts (sync processing):** OCR HTTP read ~30s (`OCR_TIMEOUT_MS`); Groq chat ~20s (`GROQ_TIMEOUT_MS`); Tomcat `connection-timeout` 120s; Vite `/documents` proxy 120s. Processing can take several seconds end-to-end.
 - **Frontend** is not in Compose: `cd frontend && npm run dev`.
@@ -638,6 +638,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-21 | Default Groq model → `openai/gpt-oss-120b` (`.env.example`, Compose, `application.yml`); `llama-3.3-70b-versatile` deprecated (Groq 404). Clone setup via `scripts/setup.ps1` / `scripts/setup.sh`; README Quick start prefers scripts; notes `mvn test` + short demo walkthrough. |
 | 2026-09-20 | Sync OCR+LLM timeouts documented and wired (OCR 30s, Groq 20s, Tomcat + Vite `/documents` 120s); README / `.env.example` note three Compose services + `GROQ_API_KEY`; unit tests with fakes for validator + pipeline. |
 | 2026-09-19 | LLM provider decision: **Groq Cloud** (free-tier API) instead of xAI Grok; env `GROQ_*`; production bean name `GroqReceiptParser`. |
 | 2026-09-17 | Header extraction docs: `ExtractionPipeline` + `document.extraction` (PDFBox router); EUR-only; mock removed; diagrams `extraction-pipeline.mmd` / `extraction-classes.mmd`; Flow B and package map updated; OCR sidecar + Grok noted as remaining wiring. |
