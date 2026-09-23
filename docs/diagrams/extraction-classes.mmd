@@ -22,6 +22,8 @@ flowchart TB
   Raster[PdfPageRasterizer]
   Merger[OcrResultMerger]
   Ocr[OcrClient]
+  HttpOcr[HttpOcrClient]
+  Ocr -.->|implements| HttpOcr
 
   Impl --> PdfText
   Impl --> Usable
@@ -30,6 +32,8 @@ flowchart TB
   Impl --> Merger
 
   Parser[ReceiptParser]
+  Groq[GroqReceiptParser]
+  Parser -.->|implements| Groq
   %% GroqReceiptParser is the production bean (Groq Cloud, OpenAI-compatible HTTP).
   %% Swap later for Ollama / another provider without touching DocumentService.
 

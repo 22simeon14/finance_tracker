@@ -61,6 +61,7 @@ flowchart TB
         set_processing --> text_extract --> text_check
         text_check -->|YES / PARTIAL| parse
         parse --> normalize --> review_required
+        parse -.->|hard fail| failed
 
         text_check -->|NO| failed
         failed --> failed_choice
@@ -105,14 +106,14 @@ flowchart TB
         create_expense["Atomically create Expense, link Document,<br/>and store confirmed values"]
         save_check{"Database save succeeds?"}
         set_saved["Set Document status SAVED"]
-        open_details["Open saved expense details"]
-        success(["SUCCESS<br/>Expense appears in details, list,<br/>filters and dashboard"])
+        open_list["Open expense list (#/expenses)"]
+        success(["SUCCESS<br/>Expense appears in list,<br/>filters and dashboard"])
         save_error["Keep review data and<br/>show retry option"]
         return_review_2(["RETURN TO REVIEW<br/>Retry after the save error"])
 
         create_expense --> save_check
         save_check -->|YES| set_saved
-        set_saved --> open_details --> success
+        set_saved --> open_list --> success
         save_check -->|NO| save_error
         save_error --> return_review_2
     end
@@ -148,7 +149,7 @@ flowchart TB
     class failed_choice orangeAction
     class review_required reviewGate
     class show_review,approve reviewAction
-    class create_expense,set_saved,open_details saveAction
+    class create_expense,set_saved,open_list saveAction
     class success successNode
     class file_error,request_error,storage_error,failed,field_errors,save_error error
     class retry_upload_1,retry_upload_2,retry_upload_3,return_review_1,return_review_2 restart

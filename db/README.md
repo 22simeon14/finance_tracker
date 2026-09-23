@@ -4,6 +4,9 @@ PostgreSQL is the MVP database. Schema and seeds live under `migrations/`.
 
 ## Apply locally
 
+Migrations are ordered: `001` schema → `002` category seed → `003` EUR-only currency checks.
+**`001` alone still allows EUR/USD/GBP**; apply **`003`** for the MVP EUR-only rule.
+
 ```bash
 psql "$DATABASE_URL" -f db/migrations/001_create_mvp_schema.sql
 psql "$DATABASE_URL" -f db/migrations/002_seed_categories.sql

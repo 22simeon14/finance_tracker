@@ -9,5 +9,5 @@ stateDiagram-v2
     REVIEW_REQUIRED --> REVIEW_REQUIRED: edit, validation error, or save retry
     REVIEW_REQUIRED --> SAVED: user approves valid data
     REVIEW_REQUIRED --> [*]: hard delete pending document and file
-    SAVED --> REVIEW_REQUIRED: expense hard-deleted in Flow C
+    SAVED --> REVIEW_REQUIRED: expense unapproved (Flow C; file kept)
     SAVED --> [*]

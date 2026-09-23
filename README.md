@@ -1,5 +1,6 @@
 # finance_tracker
-Web app that helps you analyze your spending
+
+Web app for personal expense tracking: upload a receipt, review proposed fields, save an expense, then explore lists, filters, and a dashboard.
 
 ## Documentation
 
@@ -124,10 +125,10 @@ npm run dev
 
 End-to-end script (no manual DB steps). Prefer setup scripts above, then `cd frontend && npm run dev`, open [http://localhost:5173](http://localhost:5173).
 
-1. **Register / Login** — `#/register` then `#/login` (or register alone if it already signs you in).
+1. **Register / Login** — `#/register` stores the JWT and goes home; or use `#/login`.
 2. **Upload receipt** — `#/upload` (JPEG, PNG, or PDF ≤ 5 MB). Processing runs in the upload request and can take several seconds.
 3. **Review** — correct merchant, date, amount, category. If status is `PROCESSING_FAILED`, use **Continue manually** then fill the form.
-4. **Approve** — creates an expense and sets the document to `SAVED`.
+4. **Approve** — creates an expense and sets the document to `SAVED` (UI then opens `#/expenses`).
 5. **List + filters** — `#/expenses`; try from/to, category, and merchant filters.
 6. **Dashboard** — `#/dashboard`; totals come only from **approved** expenses (pending/unapproved documents never appear in aggregates).
 7. **Edit / unapprove** — open an expense (`#/expenses/{id}`), save changes, or **Unapprove** (expense gone; document returns to the pending inbox; file kept).
@@ -136,12 +137,17 @@ Forever-delete of a document + file is only from the pending inbox (`#/documents
 
 ## Tests
 
-Backend unit tests (extraction pipeline) and API integration tests (Testcontainers PostgreSQL + MockMvc):
+Backend tests:
+
+- Extraction unit tests under `backend/src/test/java/.../document/extraction/`
+- API integration: `ApiIntegrationTest` (Testcontainers PostgreSQL + MockMvc; OCR/Groq off)
 
 ```text
 cd backend && mvn test
 ```
 
-Requires JDK 21, Maven, and Docker (for Testcontainers). OCR/Groq stay off in the test profile so the suite does not call the network.
+Requires JDK 21, Maven, and Docker (for Testcontainers).
+
+API JSON errors use `{ "error": "…" }` (and `fields` for validation) via `ApiExceptionHandler`; filter-chain `401` is `{ "error": "Unauthorized" }`.
 
 For how the app is structured (auth, document processing, expenses, data model), see **[docs/architecture.md](docs/architecture.md)** and the diagrams under **[docs/diagrams/](docs/diagrams/)**.

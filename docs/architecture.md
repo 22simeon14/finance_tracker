@@ -1,7 +1,7 @@
 # AI Finance Tracker — Architecture Documentation
 
-> **Status:** Working draft  
-> **Last updated:** 2026-09-22  
+> **Status:** MVP documentation (demo-ready)  
+> **Last updated:** 2026-09-23  
 > This document records accepted decisions and how the system is built. Detail diagrams live under [`diagrams/`](diagrams/).
 
 ## Contents
@@ -208,12 +208,12 @@ flowchart TB
 | `security` | `SecurityConfig`, `JwtAuthFilter`, `JwtService`, `CurrentUser`, `UserPrincipal` | Stateless JWT API; ownership identity |
 | `user` | `User`, `UserRepository` | Account row (`email`, `password_hash`) |
 | `document` | `DocumentController`, `DocumentService`, `FileStorageService`, entities/DTOs | Upload, process, review GET, pending inbox, file stream, pending forever-delete; thin approve HTTP entry |
-| `document.extraction` | `ExtractionPipeline`, `DocumentTextGateway`, `ReceiptParser`, `ExtractionValidator`, PDFBox helpers, `OcrClient` | Text extract → parse → validate; never creates expenses |
+| `document.extraction` | `ExtractionPipeline`, `DocumentTextGateway` / `DefaultDocumentTextGateway`, `ReceiptParser` / `GroqReceiptParser`, `OcrClient` / `HttpOcrClient`, `ExtractionValidator`, PDFBox helpers | Text extract → parse → validate; never creates expenses |
 | `expense` | `ExpenseController`, `ExpenseService`, `Expense`, `ExpenseRepository`, approve / write / view DTOs | Atomic approve; owner-scoped filtered list/detail; edit; unapprove |
 | `dashboard` | `DashboardController`, `DashboardService`, aggregate DTOs | `GET /dashboard` aggregates from `expenses` only (via `ExpenseRepository`) |
 | `category` | `CategoryController`, entity/repo | List active categories |
 | `health` | `HealthController` | Liveness + DB check |
-| `config` | `WebConfig` | MVC CORS for the Vite origin |
+| `config` | `WebConfig`, `ApiExceptionHandler` | MVC CORS for the Vite origin; shared JSON error bodies |
 
 **Typical collaboration (protected document/expense call):** browser → `JwtAuthFilter` → controller → `CurrentUser` → `DocumentService` / `ExpenseService` → repositories / `FileStorageService` → JSON or file bytes.
 
@@ -308,6 +308,28 @@ Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeByte
 
 No cross-currency “one fake total”. No recent-expenses or recent-documents widgets (use `#/expenses` / `#/documents` instead). No `SecurityConfig` change (`anyRequest().authenticated()` covers new paths). Vite proxy includes `/dashboard`.
 
+### 4.6 Error responses
+
+JSON error bodies are consistent for API failures:
+
+| Source | HTTP | Body |
+| ------ | ---- | ---- |
+| Bean Validation (`MethodArgumentNotValidException`) | `400` | `{ "error": "Validation failed", "fields": { … } }` |
+| `ResponseStatusException` (business rules, ownership 404, conflicts) | status from exception | `{ "error": "<reason>" }` |
+| Unexpected exceptions (`ApiExceptionHandler`) | `500` | `{ "error": "Internal server error" }` (stack/detail in server logs only) |
+| Missing/invalid JWT (`SecurityConfig` entry point) | `401` | `{ "error": "Unauthorized" }` |
+
+`ApiExceptionHandler` (`config`) owns the first three; filter-chain 401 stays in `SecurityConfig`.
+
+### 4.7 Automated tests
+
+| Area | Location | Notes |
+| ---- | -------- | ----- |
+| Extraction units | `backend/src/test/java/.../document/extraction/` | Pipeline, validator, Groq parser, OCR client, text gateway (fakes; no live network) |
+| API integration | `ApiIntegrationTest` | Testcontainers PostgreSQL + MockMvc; OCR/Groq off; upload → continue-manual → approve / ownership |
+
+Run: `cd backend && mvn test` (JDK 21, Maven, Docker for Testcontainers).
+
 ---
 
 ## 5. Flow A — Authentication
@@ -377,7 +399,7 @@ Turn an uploaded receipt/invoice into a **user-approved** expense without silent
 6. Backend validates again, creates `expenses`, sets document `SAVED`.
 7. Expense appears in list / filters / dashboard.
 
-Full activity diagram (including failures and manual continue): [diagrams/document-processing-flow.mmd](diagrams/document-processing-flow.mmd) (SVG: [document-processing-flow.svg](diagrams/document-processing-flow.svg)). Extraction internals: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd).
+Full activity diagram (including failures and manual continue): [diagrams/document-processing-flow.mmd](diagrams/document-processing-flow.mmd). An SVG render may exist as [document-processing-flow.svg](diagrams/document-processing-flow.svg) — if it lags the `.mmd`, trust the Mermaid source. Extraction internals: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd).
 
 ### 6.3 Upload, extraction, review, and approve (current contract)
 
@@ -392,7 +414,7 @@ Processing runs **synchronously** inside `POST /documents` after the row is save
 
 Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extraction-pipeline.mmd), [extraction-classes.mmd](diagrams/extraction-classes.mmd).
 
-**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, `HttpOcrClient`, and `GroqReceiptParser` (OpenAI-compatible chat completions on text only; not xAI Grok) are in place. Sync request budgets: OCR ~30s, Groq ~20s, Spring Tomcat + Vite `/documents` proxy ~120s. Missing `GROQ_API_KEY` / OCR URL leaves those beans off and processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work). There is no filename-based mock hook anymore.
+**Implementation status:** PDFBox digital-text path, rasterize fallback, RapidOCR Compose sidecar, `HttpOcrClient`, and `GroqReceiptParser` (OpenAI-compatible chat completions on text only) are in place. Sync request budgets: OCR ~30s, Groq ~20s, Spring Tomcat + Vite `/documents` proxy ~120s. Missing `GROQ_API_KEY` / OCR URL leaves those beans off and processing fails hard into `PROCESSING_FAILED` (retry / continue-manual still work).
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → `ExtractionPipeline` → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 
@@ -479,7 +501,7 @@ stateDiagram-v2
 
 After approve, the user can **list** (with filters), **view**, **edit**, and **unapprove** saved expenses, see **dashboard aggregates**, and manage unfinished work in the **pending-documents inbox**. Ownership is always enforced through `documents.user_id`.
 
-### Current contract (Step 13)
+### Current contract
 
 | Capability | Behaviour |
 | ---------- | --------- |
@@ -547,7 +569,7 @@ sequenceDiagram
 
 ## 8. Data model
 
-PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`001` schema, `002` category seed, `003` EUR-only currency checks). Seeded categories: `db/migrations/002_seed_categories.sql` (Food & Drink, Transport, Shopping, Housing, Health, Entertainment, Utilities, Travel, Education, Other).
+PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`001` schema, `002` category seed, `003` EUR-only currency checks). On a fresh Compose volume, Postgres runs those files in name order once. **`001` alone still allows EUR/USD/GBP**; **`003` is required for EUR-only**. Seeded categories: `db/migrations/002_seed_categories.sql` (Food & Drink, Transport, Shopping, Housing, Health, Entertainment, Utilities, Travel, Education, Other).
 
 ### Table responsibilities
 
@@ -618,8 +640,8 @@ Already decided:
 - File bytes via `GET /documents/{id}/file`; review DTO includes `fileUrl`.
 - Upload MIME/size and `{UPLOAD_DIR}/{userId}/{uuid}{ext}` layout.
 - Currency **EUR only**; hard delete only; no `users.role` / no `expenses.user_id`.
-- Extraction stack: PDFBox for digital PDFs; RapidOCR sidecar for photos/scans; **Groq** JSON parse on text only (OpenAI-compatible chat API at `api.groq.com`; not xAI Grok); Java validation after parse. LLM is the semantic parser every time (not a fallback). No vision-LLM on JPEGs; no second OCR engine; no line-item tables/UI in this milestone.
-- Mock filename hook removed; `PROCESSING_FAILED` comes from real empty text or infrastructure/parse failures.
+- Extraction stack: PDFBox for digital PDFs; RapidOCR sidecar for photos/scans; **Groq** JSON parse on text only (OpenAI-compatible chat API at `api.groq.com`); Java validation after parse. LLM is the semantic parser every time (not a fallback). No vision-LLM on JPEGs; no second OCR engine; no line-item tables/UI in this milestone.
+- `PROCESSING_FAILED` comes from empty text or infrastructure/parse failures (no filename-based mock).
 
 ---
 
@@ -638,6 +660,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-23 | Docs sync: `ApiExceptionHandler` + error/test sections; Flow C / status / processing / extraction diagrams aligned (unapprove vs forever wipe; no recent widgets; approve → expense list); README + `db/README` touch-ups; status → MVP documentation. |
 | 2026-09-22 | Step 16 demo-ready: full README demo script (register → upload → review → approve → filters → dashboard → edit/unapprove); home/nav polish; confirmed unapproved docs stay out of dashboard totals. |
 | 2026-09-21 | Default Groq model → `openai/gpt-oss-120b` (`.env.example`, Compose, `application.yml`); `llama-3.3-70b-versatile` deprecated (Groq 404). Clone setup via `scripts/setup.ps1` / `scripts/setup.sh`; README Quick start prefers scripts; notes `mvn test` + short demo walkthrough. |
 | 2026-09-20 | Sync OCR+LLM timeouts documented and wired (OCR 30s, Groq 20s, Tomcat + Vite `/documents` 120s); README / `.env.example` note three Compose services + `GROQ_API_KEY`; unit tests with fakes for validator + pipeline. |

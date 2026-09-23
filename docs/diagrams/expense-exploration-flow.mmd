@@ -1,22 +1,18 @@
 flowchart TB
-    %% Flow C — Expense exploration and dashboard
-    %% Expense fields in MVP: merchant · date · total · currency · category
-    %% derived from a saved Document. Dashboard summaries are calculated
-    %% from saved expenses; they are not a separate source of truth.
-    %% Layout: green centre line = success path. Side branches = filters,
-    %% empty results, edit/delete alternatives. No long crossing arrows.
+    %% Flow C — Expense exploration and dashboard (current MVP contract)
+    %% Dashboard = aggregates from saved expenses only (no recent-list widgets).
+    %% DELETE /expenses/{id} = unapprove (file kept). Forever wipe = pending inbox only.
 
     start(["START<br/>Authenticated user"])
 
     subgraph dashboard["1. Dashboard"]
         direction TB
         open_dash["Open dashboard"]
-        load_own["Load only the current user's<br/>saved expenses"]
-        view_summary["View expense summary<br/>calculated from saved expenses"]
-        show_widgets["Show period total · by category ·<br/>by merchant · recently added documents"]
+        load_own["Load aggregates from the current user's<br/>saved expenses only"]
+        view_summary["View totals by currency · category · merchant<br/>(optional from/to period)"]
         go_list["Open expense list"]
 
-        open_dash --> load_own --> view_summary --> show_widgets --> go_list
+        open_dash --> load_own --> view_summary --> go_list
     end
 
     start --> open_dash
@@ -56,18 +52,18 @@ flowchart TB
 
     results --> open_details
 
-    subgraph actions["4. Edit, delete or return"]
+    subgraph actions["4. Edit, unapprove or return"]
         direction TB
         edit_form["Edit expense fields<br/>merchant · date · total · currency · category"]
         edit_valid{"Edited data valid?"}
         edit_error["Show field-level errors"]
         return_edit(["RETURN TO EDIT FORM<br/>Correct the highlighted fields"])
         save_edit["Save updated expense"]
-        confirm_delete{"Confirm delete?"}
-        cancel_delete(["RETURN TO DETAILS<br/>Deletion cancelled"])
-        delete_expense["Delete expense"]
+        confirm_unapprove{"Confirm unapprove?"}
+        cancel_unapprove(["RETURN TO DETAILS<br/>Unapprove cancelled"])
+        unapprove_expense["Unapprove: delete expense row;<br/>document → REVIEW_REQUIRED; file kept"]
         refresh_stats["Recalculate dashboard summary<br/>from remaining saved expenses"]
-        return_list["Return to expense list"]
+        return_list["Return to expense list<br/>(notice + link to pending inbox)"]
         end_ok(["END<br/>Exploration complete"])
 
         edit_form --> edit_valid
@@ -76,19 +72,37 @@ flowchart TB
         edit_valid -->|YES| save_edit
         save_edit --> refresh_stats
 
-        confirm_delete -->|NO| cancel_delete
-        confirm_delete -->|YES| delete_expense
-        delete_expense --> refresh_stats
+        confirm_unapprove -->|NO| cancel_unapprove
+        confirm_unapprove -->|YES| unapprove_expense
+        unapprove_expense --> refresh_stats
 
         refresh_stats --> return_list
         return_list --> end_ok
     end
 
     user_action -->|EDIT| edit_form
-    user_action -->|DELETE| confirm_delete
+    user_action -->|UNAPPROVE| confirm_unapprove
     user_action -->|RETURN| return_list
 
-    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation errors. Grey/orange branches are empty results or cancelled delete.<br/>Dashboard statistics are always recalculated from saved expenses, never stored as the source of truth."]
+    subgraph inbox["5. Pending inbox (parallel)"]
+        direction TB
+        open_inbox["Open pending inbox<br/>non-SAVED documents"]
+        inbox_action{"User action"}
+        resume_review["Open review for a pending document"]
+        forever_delete["Forever wipe: delete document row + file"]
+        inbox_end(["END<br/>No expense change or document removed"])
+
+        open_inbox --> inbox_action
+        inbox_action -->|RESUME| resume_review
+        inbox_action -->|DELETE FOREVER| forever_delete
+        resume_review --> inbox_end
+        forever_delete --> inbox_end
+    end
+
+    start --> open_inbox
+    unapprove_expense -.->|"document back in inbox"| open_inbox
+
+    legend["Reading rule: follow the green centre line for the success path.<br/>Red branches are validation errors. Grey/orange branches are empty results or cancelled unapprove.<br/>Dashboard statistics are always recalculated from saved expenses, never from pending documents.<br/>Unapprove keeps the file; forever wipe is only from the pending inbox."]
 
     classDef startNode fill:#16a34a,stroke:#14532d,stroke-width:3px,color:#fff
     classDef action fill:#ffffff,stroke:#94a3b8,color:#0f172a
@@ -103,22 +117,25 @@ flowchart TB
     classDef pause fill:#e0f2fe,stroke:#0284c7,color:#075985
     classDef endNode fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
     classDef deleteAction fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    classDef inboxAction fill:#ecfeff,stroke:#06b6d4,color:#0f172a
     classDef legendBox fill:#f8fafc,stroke:#cbd5e1,color:#334155
 
     class start startNode
-    class open_dash,load_own,view_summary,show_widgets,go_list dashAction
+    class open_dash,load_own,view_summary,go_list dashAction
     class list_view,apply_filters,results listAction
     class open_details,show_doc,edit_form detailAction
     class save_edit,refresh_stats,return_list saveAction
-    class filters_valid,show_results,user_action,edit_valid,confirm_delete decision
+    class filters_valid,show_results,user_action,edit_valid,confirm_unapprove,inbox_action decision
     class filter_error,edit_error error
-    class return_filters,return_edit,cancel_delete restart
+    class return_filters,return_edit,cancel_unapprove restart
     class empty_state,clear_filters,return_list_empty emptyAlt
-    class delete_expense deleteAction
-    class end_ok endNode
+    class unapprove_expense,forever_delete deleteAction
+    class open_inbox,resume_review inboxAction
+    class end_ok,inbox_end endNode
     class legend legendBox
 
     style dashboard fill:#eff6ff,stroke:#93c5fd,stroke-width:2px,color:#1e3a8a
     style listing fill:#f5f3ff,stroke:#c4b5fd,stroke-width:2px,color:#5b21b6
     style details fill:#fffbeb,stroke:#fde68a,stroke-width:2px,color:#92400e
     style actions fill:#f0fdf4,stroke:#86efac,stroke-width:2px,color:#166534
+    style inbox fill:#ecfeff,stroke:#67e8f9,stroke-width:2px,color:#155e75
