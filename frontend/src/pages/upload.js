@@ -37,6 +37,10 @@ export function renderUploadPage(root) {
       </form>
 
       <p class="auth-switch">
+        <a href="#/documents">Pending inbox</a>
+        ·
+        <a href="#/expenses">Expenses</a>
+        ·
         <a href="#/">Back to home</a>
       </p>
     </main>

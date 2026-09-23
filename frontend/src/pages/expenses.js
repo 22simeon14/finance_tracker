@@ -69,6 +69,10 @@ export function renderExpensesPage(root) {
       <p class="auth-switch">
         <a href="#/upload">Upload document</a>
         ·
+        <a href="#/dashboard">Dashboard</a>
+        ·
+        <a href="#/documents">Pending inbox</a>
+        ·
         <a href="#/">Back to home</a>
       </p>
     </main>

@@ -15,7 +15,7 @@ export function renderHomePage(root) {
   root.innerHTML = `
     <main class="page">
       <h1>Finance Tracker</h1>
-      <p class="subtitle">MVP skeleton</p>
+      <p class="subtitle">Upload a receipt, review the fields, save the expense</p>
 
       <section class="auth-card">
         <h2>Account</h2>

@@ -28,6 +28,8 @@ export function renderDocumentsPage(root) {
         ·
         <a href="#/expenses">Expenses</a>
         ·
+        <a href="#/dashboard">Dashboard</a>
+        ·
         <a href="#/">Back to home</a>
       </p>
     </main>

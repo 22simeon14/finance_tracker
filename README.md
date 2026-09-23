@@ -122,13 +122,17 @@ npm run dev
 
 ## Demo walkthrough
 
-1. Register a user and log in.
-2. Upload a receipt (image or PDF) from the app.
-3. Wait for processing, then open the review screen; correct fields if needed (or use continue-manual when auto-extract failed).
-4. Approve → expense is saved; document status becomes `SAVED`.
-5. Browse expenses and the dashboard aggregates.
+End-to-end script (no manual DB steps). Prefer setup scripts above, then `cd frontend && npm run dev`, open [http://localhost:5173](http://localhost:5173).
 
-A deeper product walkthrough belongs with later demo polish; this path is enough to exercise the happy flow locally.
+1. **Register / Login** — `#/register` then `#/login` (or register alone if it already signs you in).
+2. **Upload receipt** — `#/upload` (JPEG, PNG, or PDF ≤ 5 MB). Processing runs in the upload request and can take several seconds.
+3. **Review** — correct merchant, date, amount, category. If status is `PROCESSING_FAILED`, use **Continue manually** then fill the form.
+4. **Approve** — creates an expense and sets the document to `SAVED`.
+5. **List + filters** — `#/expenses`; try from/to, category, and merchant filters.
+6. **Dashboard** — `#/dashboard`; totals come only from **approved** expenses (pending/unapproved documents never appear in aggregates).
+7. **Edit / unapprove** — open an expense (`#/expenses/{id}`), save changes, or **Unapprove** (expense gone; document returns to the pending inbox; file kept).
+
+Forever-delete of a document + file is only from the pending inbox (`#/documents`), not from an approved expense.
 
 ## Tests
 
