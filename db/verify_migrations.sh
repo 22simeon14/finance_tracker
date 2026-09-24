@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Main Responsibility: Verify MVP migrations on a clean temporary PostgreSQL container.
-# Happy path only: apply 001 + 002 + 003 + 004, then run db/verify_happy_path.sql
+# Happy path only: apply 001–005, then run db/verify_happy_path.sql
 
 set -euo pipefail
 
@@ -73,6 +73,9 @@ run_psql_file "${REPO_ROOT}/db/migrations/003_currency_eur_only.sql"
 
 echo "Applying 004_category_parent.sql..."
 run_psql_file "${REPO_ROOT}/db/migrations/004_category_parent.sql"
+
+echo "Applying 005_document_extraction_lines.sql..."
+run_psql_file "${REPO_ROOT}/db/migrations/005_document_extraction_lines.sql"
 
 echo "Running happy-path verification..."
 run_psql_file "${REPO_ROOT}/db/verify_happy_path.sql"

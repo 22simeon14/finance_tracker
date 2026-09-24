@@ -1,4 +1,4 @@
--- Main Responsibility: Happy-path verification after 001 + 002 + 003 + 004 migrations.
+-- Main Responsibility: Happy-path verification after 001–005 migrations.
 -- Fails with RAISE EXCEPTION when an expectation is not met.
 -- Run with: psql ... -v ON_ERROR_STOP=1 -f db/verify_happy_path.sql
 
@@ -27,11 +27,12 @@ BEGIN
           'categories',
           'documents',
           'document_extractions',
+          'document_extraction_lines',
           'expenses'
       );
 
-    IF table_count <> 5 THEN
-        RAISE EXCEPTION 'Expected 5 MVP tables, found %', table_count;
+    IF table_count <> 6 THEN
+        RAISE EXCEPTION 'Expected 6 MVP tables, found %', table_count;
     END IF;
 
     SELECT COUNT(*)
@@ -44,12 +45,13 @@ BEGIN
           'expenses_expense_date_idx',
           'expenses_category_id_idx',
           'expenses_merchant_idx',
-          'categories_parent_id_idx'
+          'categories_parent_id_idx',
+          'document_extraction_lines_extraction_id_idx'
       );
 
-    -- Includes categories_parent_id_idx from migration 004.
-    IF index_count <> 6 THEN
-        RAISE EXCEPTION 'Expected 6 MVP indexes, found %', index_count;
+    -- Includes categories_parent_id_idx (004) and extraction lines index (005).
+    IF index_count <> 7 THEN
+        RAISE EXCEPTION 'Expected 7 MVP indexes, found %', index_count;
     END IF;
 
     SELECT COUNT(*)
