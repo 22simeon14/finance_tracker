@@ -26,18 +26,21 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Main Responsibility: Verify GroqReceiptParser prompt/schema, EUR coercion, and slug map.
+ * Main Responsibility: Verify GroqReceiptParser prompt/schema, EUR coercion, slug map, lines.
  */
 class GroqReceiptParserTest {
 
     private static final List<CategoryOption> CATEGORIES = List.of(
             new CategoryOption(1L, "Food & Drink", "food"),
-            new CategoryOption(2L, "Transport", "transport")
+            new CategoryOption(2L, "Transport", "transport"),
+            new CategoryOption(11L, "Meat", "meat"),
+            new CategoryOption(21L, "Toiletries", "toiletries")
     );
 
     private RestClient.Builder restClientBuilder;
     private MockRestServiceServer server;
     private GroqReceiptParser parser;
+    private final ExtractionValidator validator = new ExtractionValidator();
 
     @BeforeEach
     void setUp() {
@@ -61,6 +64,7 @@ class GroqReceiptParserTest {
                 .andExpect(content().string(Matchers.containsString("\"type\":\"json_object\"")))
                 .andExpect(content().string(Matchers.containsString("merchant")))
                 .andExpect(content().string(Matchers.containsString("categorySlug")))
+                .andExpect(content().string(Matchers.containsString("lineItems")))
                 .andExpect(content().string(Matchers.containsString("food")))
                 .andExpect(content().string(Matchers.containsString("Cafe Central")))
                 .andRespond(withSuccess(
@@ -69,7 +73,7 @@ class GroqReceiptParserTest {
                           "choices": [
                             {
                               "message": {
-                                "content": "{\\"merchant\\":\\"Cafe Central\\",\\"date\\":\\"2024-06-15\\",\\"totalAmount\\":12.5,\\"currency\\":\\"USD\\",\\"categorySlug\\":\\"food\\"}"
+                                "content": "{\\"merchant\\":\\"Cafe Central\\",\\"date\\":\\"2024-06-15\\",\\"totalAmount\\":12.5,\\"currency\\":\\"USD\\",\\"categorySlug\\":\\"food\\",\\"lineItems\\":[]}"
                               }
                             }
                           ]
@@ -92,6 +96,74 @@ class GroqReceiptParserTest {
     }
 
     @Test
+    void parseAndValidateKeepsTwoLineItemsWithCategoriesAndDropsInvalid() {
+        // Sample Groq JSON: two good lines + one with amount 0 that the validator drops.
+        server.expect(requestTo("http://groq.local/chat/completions"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().string(Matchers.containsString("meat")))
+                .andExpect(content().string(Matchers.containsString("toiletries")))
+                .andRespond(withSuccess(
+                        """
+                        {
+                          "choices": [
+                            {
+                              "message": {
+                                "content": "{\\"merchant\\":\\"Lidl\\",\\"date\\":\\"2024-06-15\\",\\"totalAmount\\":47,\\"currency\\":\\"EUR\\",\\"categorySlug\\":\\"food\\",\\"lineItems\\":[{\\"description\\":\\"Minced meat\\",\\"amount\\":8,\\"categorySlug\\":\\"meat\\"},{\\"description\\":\\"Soap\\",\\"amount\\":4,\\"categorySlug\\":\\"toiletries\\"},{\\"description\\":\\"Bad row\\",\\"amount\\":0,\\"categorySlug\\":\\"food\\"}]}"
+                              }
+                            }
+                          ]
+                        }
+                        """,
+                        MediaType.APPLICATION_JSON
+                ));
+
+        ExtractionResult parsed = parser.parse(
+                new OcrResult("Lidl meat soap", List.of()),
+                CATEGORIES
+        );
+        ExtractionResult result = validator.validate(parsed, CATEGORIES);
+
+        assertEquals(2, result.lineItems().size());
+        assertEquals("Minced meat", result.lineItems().get(0).description());
+        assertEquals(0, new BigDecimal("8").compareTo(result.lineItems().get(0).amount()));
+        assertEquals(11L, result.lineItems().get(0).categoryId());
+        assertEquals("Soap", result.lineItems().get(1).description());
+        assertEquals(0, new BigDecimal("4").compareTo(result.lineItems().get(1).amount()));
+        assertEquals(21L, result.lineItems().get(1).categoryId());
+        server.verify();
+    }
+
+    @Test
+    void parseKeepsLineWhenCategorySlugUnknown() {
+        server.expect(requestTo("http://groq.local/chat/completions"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(
+                        """
+                        {
+                          "choices": [
+                            {
+                              "message": {
+                                "content": "{\\"merchant\\":\\"Shop\\",\\"date\\":null,\\"totalAmount\\":5,\\"currency\\":\\"EUR\\",\\"categorySlug\\":null,\\"lineItems\\":[{\\"description\\":\\"Mystery\\",\\"amount\\":5,\\"categorySlug\\":\\"not-a-real-slug\\"}]}"
+                              }
+                            }
+                          ]
+                        }
+                        """,
+                        MediaType.APPLICATION_JSON
+                ));
+
+        ExtractionResult result = parser.parse(
+                new OcrResult("Shop Mystery 5", List.of()),
+                CATEGORIES
+        );
+
+        assertEquals(1, result.lineItems().size());
+        assertEquals("Mystery", result.lineItems().get(0).description());
+        assertNull(result.lineItems().get(0).categoryId());
+        server.verify();
+    }
+
+    @Test
     void parseLeavesCategoryNullWhenSlugUnknown() {
         server.expect(requestTo("http://groq.local/chat/completions"))
                 .andExpect(method(HttpMethod.POST))
@@ -101,7 +173,7 @@ class GroqReceiptParserTest {
                           "choices": [
                             {
                               "message": {
-                                "content": "{\\"merchant\\":\\"Shop\\",\\"date\\":null,\\"totalAmount\\":9.99,\\"currency\\":\\"BGN\\",\\"categorySlug\\":\\"not-a-real-slug\\"}"
+                                "content": "{\\"merchant\\":\\"Shop\\",\\"date\\":null,\\"totalAmount\\":9.99,\\"currency\\":\\"BGN\\",\\"categorySlug\\":\\"not-a-real-slug\\",\\"lineItems\\":[]}"
                               }
                             }
                           ]

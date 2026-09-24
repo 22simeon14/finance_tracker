@@ -30,8 +30,8 @@ import static org.mockito.Mockito.when;
 /**
  * Main Responsibility: Verify ExtractionPipeline with fake gateway + fake parser.
  *
- * Covers success, partial header, empty text (no usable header), missing collaborators,
- * and that a leaf category is not offered for the receipt header.
+ * Covers success, partial header, empty text, missing collaborators, line-item pass-through,
+ * and that active groups and leaves are offered to the parser.
  */
 class ExtractionPipelineTest {
 
@@ -95,6 +95,46 @@ class ExtractionPipelineTest {
     }
 
     @Test
+    void extractPassesLineItemsThroughValidation() {
+        Category meat = new Category();
+        meat.setId(11L);
+        meat.setName("Meat");
+        meat.setSlug("meat");
+        meat.setActive(true);
+        meat.setParentId(1L);
+
+        Category food = new Category();
+        food.setId(1L);
+        food.setName("Food & Drink");
+        food.setSlug("food");
+        food.setActive(true);
+        when(categoryRepository.findByIsActiveTrueOrderByNameAsc()).thenReturn(List.of(food, meat));
+
+        OcrResult ocr = new OcrResult("Lidl meat 8 soap 0", List.of());
+        when(textGateway.extractText(eq(sampleFile), eq("image/png"))).thenReturn(ocr);
+        when(receiptParser.parse(eq(ocr), anyList())).thenReturn(
+                new ExtractionResult(
+                        ocr.rawText(),
+                        "Lidl",
+                        LocalDate.of(2024, 6, 1),
+                        new BigDecimal("47"),
+                        "EUR",
+                        1L,
+                        List.of(
+                                new LineItemProposal("Minced meat", new BigDecimal("8"), 11L),
+                                new LineItemProposal("Bad", BigDecimal.ZERO, 1L)
+                        )
+                )
+        );
+
+        ExtractionResult result = pipeline.extract(sampleFile, "image/png");
+
+        assertEquals(1, result.lineItems().size());
+        assertEquals("Minced meat", result.lineItems().get(0).description());
+        assertEquals(11L, result.lineItems().get(0).categoryId());
+    }
+
+    @Test
     void extractAllowsPartialHeaderForReview() {
         OcrResult ocr = new OcrResult("TOTAL 9.99", List.of());
         when(textGateway.extractText(any(), any())).thenReturn(ocr);
@@ -132,7 +172,7 @@ class ExtractionPipelineTest {
     }
 
     @Test
-    void extractOffersOnlyTopLevelCategoriesToTheParser() {
+    void extractOffersAllActiveCategoriesToTheParser() {
         Category meat = new Category();
         meat.setId(11L);
         meat.setName("Meat");
@@ -165,8 +205,9 @@ class ExtractionPipelineTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<CategoryOption>> captor = ArgumentCaptor.forClass(List.class);
         verify(receiptParser).parse(eq(ocr), captor.capture());
-        assertEquals(1, captor.getValue().size());
+        assertEquals(2, captor.getValue().size());
         assertEquals("food", captor.getValue().get(0).slug());
+        assertEquals("meat", captor.getValue().get(1).slug());
     }
 
     @Test

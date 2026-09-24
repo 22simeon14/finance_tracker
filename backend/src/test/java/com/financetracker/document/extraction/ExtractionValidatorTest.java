@@ -11,13 +11,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Main Responsibility: Verify ExtractionValidator EUR / amount / date / category rules.
+ * Main Responsibility: Verify ExtractionValidator EUR / amount / date / category / lines.
  */
 class ExtractionValidatorTest {
 
     private static final List<CategoryOption> CATEGORIES = List.of(
             new CategoryOption(1L, "Food & Drink", "food"),
-            new CategoryOption(2L, "Transport", "transport")
+            new CategoryOption(2L, "Transport", "transport"),
+            new CategoryOption(11L, "Meat", "meat")
     );
 
     private final ExtractionValidator validator = new ExtractionValidator();
@@ -101,5 +102,66 @@ class ExtractionValidatorTest {
 
         assertNull(result.merchant());
         assertEquals("EUR", result.currency());
+    }
+
+    @Test
+    void dropsLineItemsWithoutDescriptionOrNonPositiveAmount() {
+        ExtractionResult parsed = new ExtractionResult(
+                "raw",
+                "Lidl",
+                LocalDate.of(2024, 6, 1),
+                new BigDecimal("47"),
+                "EUR",
+                1L,
+                List.of(
+                        new LineItemProposal("Meat", new BigDecimal("8"), 11L),
+                        new LineItemProposal("  ", new BigDecimal("3"), 1L),
+                        new LineItemProposal("Soap", BigDecimal.ZERO, 1L),
+                        new LineItemProposal(null, new BigDecimal("2"), 1L),
+                        new LineItemProposal("Bread", new BigDecimal("-1"), 1L)
+                )
+        );
+
+        ExtractionResult result = validator.validate(parsed, CATEGORIES);
+
+        assertEquals(1, result.lineItems().size());
+        assertEquals("Meat", result.lineItems().get(0).description());
+        assertEquals(11L, result.lineItems().get(0).categoryId());
+    }
+
+    @Test
+    void keepsLineWithNullCategoryWhenSlugWasUnknown() {
+        ExtractionResult parsed = new ExtractionResult(
+                "raw",
+                "Shop",
+                null,
+                new BigDecimal("5"),
+                "EUR",
+                null,
+                List.of(new LineItemProposal("Mystery", new BigDecimal("5"), null))
+        );
+
+        ExtractionResult result = validator.validate(parsed, CATEGORIES);
+
+        assertEquals(1, result.lineItems().size());
+        assertNull(result.lineItems().get(0).categoryId());
+    }
+
+    @Test
+    void allowsEmptyLineItemsAfterCleanup() {
+        ExtractionResult parsed = new ExtractionResult(
+                "raw",
+                "Shop",
+                LocalDate.of(2024, 1, 1),
+                new BigDecimal("10"),
+                "EUR",
+                1L,
+                List.of(new LineItemProposal("", new BigDecimal("10"), 1L))
+        );
+
+        ExtractionResult result = validator.validate(parsed, CATEGORIES);
+
+        assertTrue(result.hasUsableHeader());
+        assertTrue(result.lineItems().isEmpty());
     }
 }
