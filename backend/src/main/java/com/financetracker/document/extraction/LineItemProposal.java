@@ -3,10 +3,10 @@ package com.financetracker.document.extraction;
 import java.math.BigDecimal;
 
 /**
- * Main Responsibility: One proposed line item from extraction (not persisted yet).
+ * Main Responsibility: One proposed line item from extraction (in memory only).
  *
- * ExtractionResult always carries an empty list in this milestone so a later
- * step can reuse the same result shape without changing DocumentService.
+ * categoryId is set when categorySlug matched an active category; otherwise null.
+ * Persistence and review UI come in later steps.
  */
-public record LineItemProposal(String description, BigDecimal amount) {
+public record LineItemProposal(String description, BigDecimal amount, Long categoryId) {
 }

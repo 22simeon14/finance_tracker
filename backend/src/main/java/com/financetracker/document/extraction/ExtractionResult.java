@@ -5,10 +5,10 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * Main Responsibility: Header proposals from OCR + LLM parse (before human review).
+ * Main Responsibility: Header and line-item proposals from OCR + LLM parse.
  *
- * lineItems is always empty in this milestone and is not mapped to the API or DB yet.
- * DocumentService persists only the header fields onto document_extractions.
+ * lineItems live in memory for this step; DocumentService still persists only
+ * header fields onto document_extractions until a later migration.
  */
 public record ExtractionResult(
         String rawOcrText,
@@ -24,7 +24,7 @@ public record ExtractionResult(
         lineItems = lineItems == null ? List.of() : List.copyOf(lineItems);
     }
 
-    /** Header-only result with a forced empty line-item list. */
+    /** Convenience when the caller has no line items (or an empty list). */
     public static ExtractionResult ofHeaders(
             String rawOcrText,
             String merchant,
@@ -47,6 +47,7 @@ public record ExtractionResult(
     /**
      * True when at least one header field is useful for review.
      * Currency alone does not count (validator always forces EUR).
+     * Line items alone do not count — a receipt with no header can still go to review.
      */
     public boolean hasUsableHeader() {
         return isPresent(merchant) || date != null || totalAmount != null || categoryId != null;

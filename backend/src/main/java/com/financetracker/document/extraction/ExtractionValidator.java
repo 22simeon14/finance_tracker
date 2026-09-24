@@ -4,15 +4,17 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * Main Responsibility: Sanitize LLM header proposals with simple Java rules.
+ * Main Responsibility: Sanitize LLM header and line-item proposals with simple Java rules.
  *
  * Forces EUR, drops non-positive amounts and absurd dates, and nulls category ids
- * that are not in the active list. Does not invent totals with regex.
+ * that are not in the active list. Drops line items without a description or with
+ * amount ≤ 0. Does not invent totals with regex. Empty line list after cleanup is fine.
  */
 @Component
 public class ExtractionValidator {
@@ -22,7 +24,7 @@ public class ExtractionValidator {
     private static final LocalDate EARLIEST_REASONABLE_DATE = LocalDate.of(1990, 1, 1);
 
     /**
-     * Return a cleaned copy. Currency is always EUR; lineItems stay empty.
+     * Return a cleaned copy. Currency is always EUR; invalid line items are removed.
      */
     public ExtractionResult validate(ExtractionResult parsed, List<CategoryOption> categories) {
         Set<Long> activeCategoryIds = toActiveIds(categories);
@@ -31,14 +33,16 @@ public class ExtractionValidator {
         LocalDate date = normalizeDate(parsed.date());
         BigDecimal amount = normalizeAmount(parsed.totalAmount());
         Long categoryId = normalizeCategoryId(parsed.categoryId(), activeCategoryIds);
+        List<LineItemProposal> lineItems = normalizeLineItems(parsed.lineItems(), activeCategoryIds);
 
-        return ExtractionResult.ofHeaders(
+        return new ExtractionResult(
                 parsed.rawOcrText(),
                 merchant,
                 date,
                 amount,
                 EUR,
-                categoryId
+                categoryId,
+                lineItems
         );
     }
 
@@ -53,6 +57,33 @@ public class ExtractionValidator {
             }
         }
         return ids;
+    }
+
+    /**
+     * Keep rows with a non-blank description and a positive amount.
+     * Unknown categoryId becomes null; the row itself is kept.
+     */
+    private static List<LineItemProposal> normalizeLineItems(
+            List<LineItemProposal> lineItems,
+            Set<Long> activeCategoryIds
+    ) {
+        if (lineItems == null || lineItems.isEmpty()) {
+            return List.of();
+        }
+        List<LineItemProposal> cleaned = new ArrayList<>();
+        for (LineItemProposal item : lineItems) {
+            if (item == null) {
+                continue;
+            }
+            String description = normalizeMerchant(item.description());
+            BigDecimal amount = normalizeAmount(item.amount());
+            if (description == null || amount == null) {
+                continue;
+            }
+            Long categoryId = normalizeCategoryId(item.categoryId(), activeCategoryIds);
+            cleaned.add(new LineItemProposal(description, amount, categoryId));
+        }
+        return List.copyOf(cleaned);
     }
 
     private static String normalizeMerchant(String merchant) {

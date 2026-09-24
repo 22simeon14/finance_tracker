@@ -14,6 +14,7 @@ import java.util.List;
  * Single entry point for DocumentService (and a future async worker). Collaborators:
  * DocumentTextGateway, OcrClient, ReceiptParser (GroqReceiptParser when GROQ_API_KEY
  * is set). Missing gateway or parser → ExtractionException (PROCESSING_FAILED).
+ * Line items stay in the in-memory ExtractionResult; persistence is a later step.
  */
 @Service
 public class ExtractionPipeline {
@@ -36,7 +37,7 @@ public class ExtractionPipeline {
     }
 
     /**
-     * Extract header proposals from a file already on disk.
+     * Extract header and line-item proposals from a file already on disk.
      * Empty OCR text → result with no usable header (caller marks PROCESSING_FAILED).
      * Infrastructure / parse errors → ExtractionException.
      */
@@ -57,22 +58,23 @@ public class ExtractionPipeline {
 
         List<CategoryOption> categories = loadActiveCategories();
         ExtractionResult parsed = parser.parse(ocrResult, categories);
-        // This milestone never persists line items; force empty regardless of parser output.
-        ExtractionResult headersOnly = ExtractionResult.ofHeaders(
-                parsed.rawOcrText() != null ? parsed.rawOcrText() : ocrResult.rawText(),
+        // Keep parser lineItems; only fill raw OCR text when the parser omitted it.
+        String rawText = parsed.rawOcrText() != null ? parsed.rawOcrText() : ocrResult.rawText();
+        ExtractionResult withText = new ExtractionResult(
+                rawText,
                 parsed.merchant(),
                 parsed.date(),
                 parsed.totalAmount(),
                 parsed.currency(),
-                parsed.categoryId()
+                parsed.categoryId(),
+                parsed.lineItems()
         );
-        return extractionValidator.validate(headersOnly, categories);
+        return extractionValidator.validate(withText, categories);
     }
 
     private List<CategoryOption> loadActiveCategories() {
-        // The receipt header is a top-level group. Leaves are not offered here.
+        // Groups and leaves — line items may map to either; header UI still filters later.
         return categoryRepository.findByIsActiveTrueOrderByNameAsc().stream()
-                .filter(category -> category.getParentId() == null)
                 .map(this::toCategoryOption)
                 .toList();
     }

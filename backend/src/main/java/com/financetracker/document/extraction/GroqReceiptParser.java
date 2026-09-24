@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,12 +25,12 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Main Responsibility: Call Groq Cloud chat completions and map JSON headers to ExtractionResult.
+ * Main Responsibility: Call Groq Cloud chat completions and map JSON to ExtractionResult.
  *
  * Uses the OpenAI-compatible HTTP shape at GROQ_API_BASE_URL (not api.openai.com / xAI).
  * Sends OCR text only — never image bytes. Currency is always coerced to EUR. Category
- * maps only when categorySlug matches an active option; otherwise categoryId stays null.
- * Active when app.groq.api-key is non-blank.
+ * maps only when categorySlug matches an active option (group or leaf); otherwise
+ * categoryId stays null and the line is kept. Active when app.groq.api-key is non-blank.
  */
 @Service
 @ConditionalOnExpression("T(org.springframework.util.StringUtils).hasText('${app.groq.api-key:}')")
@@ -40,7 +41,7 @@ public class GroqReceiptParser implements ReceiptParser {
 
     /**
      * Field contract told to the model (llama-3.3 supports json_object, not constrained
-     * json_schema decoding on Groq). Keep in sync with ParsedHeaderJson.
+     * json_schema decoding on Groq). Keep in sync with mapContentToResult.
      */
     static final String RECEIPT_HEADER_SCHEMA = """
             {
@@ -48,7 +49,14 @@ public class GroqReceiptParser implements ReceiptParser {
               "date": "YYYY-MM-DD" string or null,
               "totalAmount": number or null,
               "currency": string or null,
-              "categorySlug": string or null
+              "categorySlug": string or null,
+              "lineItems": [
+                {
+                  "description": string,
+                  "amount": number,
+                  "categorySlug": string or null
+                }
+              ]
             }
             """;
 
@@ -113,7 +121,7 @@ public class GroqReceiptParser implements ReceiptParser {
     private static String buildSystemPrompt(List<CategoryOption> categories) {
         String allowedSlugs = allowedSlugList(categories);
         return """
-                You extract receipt/invoice header fields from OCR text.
+                You extract receipt/invoice header fields and purchased line items from OCR text.
                 Respond with a single JSON object only (no markdown), matching this schema:
                 %s
                 Rules:
@@ -121,8 +129,11 @@ public class GroqReceiptParser implements ReceiptParser {
                 - date must be ISO-8601 YYYY-MM-DD when known.
                 - totalAmount is the final amount charged (not tax alone); use a JSON number.
                 - currency may appear as printed (EUR, USD, BGN, etc.); the server forces EUR later.
-                - categorySlug must be one of [%s] or null. Never invent other slugs.
-                """.formatted(RECEIPT_HEADER_SCHEMA.strip(), allowedSlugs);
+                - categorySlug (receipt) should be a broad group when possible; must be one of [%s] or null.
+                - lineItems: one object per purchased product line when visible; use [] if none.
+                - each lineItems[].categorySlug must be one of [%s] or null. Never invent other slugs.
+                - lineItems[].amount is that line's price as a JSON number; description is the product text.
+                """.formatted(RECEIPT_HEADER_SCHEMA.strip(), allowedSlugs, allowedSlugs);
     }
 
     private static String allowedSlugList(List<CategoryOption> categories) {
@@ -170,16 +181,42 @@ public class GroqReceiptParser implements ReceiptParser {
         LocalDate date = parseDate(root.get("date"));
         BigDecimal totalAmount = parseAmount(root.get("totalAmount"));
         Long categoryId = mapCategoryId(textOrNull(root.get("categorySlug")), categories);
+        List<LineItemProposal> lineItems = mapLineItems(root.get("lineItems"), categories);
 
         // Product rule: store EUR even when the model prints BGN/USD/GBP.
-        return ExtractionResult.ofHeaders(
+        return new ExtractionResult(
                 rawOcrText,
                 merchant,
                 date,
                 totalAmount,
                 EUR,
-                categoryId
+                categoryId,
+                lineItems
         );
+    }
+
+    /**
+     * Map each JSON line. Unknown categorySlug → null categoryId; the row is still kept
+     * so the validator can drop only description/amount problems.
+     */
+    private static List<LineItemProposal> mapLineItems(
+            JsonNode arrayNode,
+            List<CategoryOption> categories
+    ) {
+        if (arrayNode == null || !arrayNode.isArray()) {
+            return List.of();
+        }
+        List<LineItemProposal> items = new ArrayList<>();
+        for (JsonNode node : arrayNode) {
+            if (node == null || !node.isObject()) {
+                continue;
+            }
+            String description = textOrNull(node.get("description"));
+            BigDecimal amount = parseAmount(node.get("amount"));
+            Long categoryId = mapCategoryId(textOrNull(node.get("categorySlug")), categories);
+            items.add(new LineItemProposal(description, amount, categoryId));
+        }
+        return List.copyOf(items);
     }
 
     private static Long mapCategoryId(String categorySlug, List<CategoryOption> categories) {
