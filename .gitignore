@@ -1,5 +1,6 @@
 .env
 TODO.txt
+IMPORTANT_CONSIDERATIONS.txt
 *.class
 *.jar
 *.war

@@ -5,6 +5,7 @@ import com.financetracker.category.CategoryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
 import java.math.BigDecimal;
@@ -29,7 +30,8 @@ import static org.mockito.Mockito.when;
 /**
  * Main Responsibility: Verify ExtractionPipeline with fake gateway + fake parser.
  *
- * Covers success, partial header, empty text (no usable header), and missing collaborators.
+ * Covers success, partial header, empty text (no usable header), missing collaborators,
+ * and that a leaf category is not offered for the receipt header.
  */
 class ExtractionPipelineTest {
 
@@ -127,6 +129,44 @@ class ExtractionPipelineTest {
         assertNull(result.merchant());
         assertNull(result.totalAmount());
         verify(receiptParser, never()).parse(any(), anyList());
+    }
+
+    @Test
+    void extractOffersOnlyTopLevelCategoriesToTheParser() {
+        Category meat = new Category();
+        meat.setId(11L);
+        meat.setName("Meat");
+        meat.setSlug("meat");
+        meat.setActive(true);
+        meat.setParentId(1L);
+
+        Category food = new Category();
+        food.setId(1L);
+        food.setName("Food & Drink");
+        food.setSlug("food");
+        food.setActive(true);
+        when(categoryRepository.findByIsActiveTrueOrderByNameAsc()).thenReturn(List.of(food, meat));
+
+        OcrResult ocr = new OcrResult("Meat 8.00", List.of());
+        when(textGateway.extractText(eq(sampleFile), eq("image/png"))).thenReturn(ocr);
+        when(receiptParser.parse(eq(ocr), anyList())).thenReturn(
+                ExtractionResult.ofHeaders(
+                        ocr.rawText(),
+                        "Lidl",
+                        null,
+                        new BigDecimal("8.00"),
+                        "EUR",
+                        1L
+                )
+        );
+
+        pipeline.extract(sampleFile, "image/png");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CategoryOption>> captor = ArgumentCaptor.forClass(List.class);
+        verify(receiptParser).parse(eq(ocr), captor.capture());
+        assertEquals(1, captor.getValue().size());
+        assertEquals("food", captor.getValue().get(0).slug());
     }
 
     @Test

@@ -1,7 +1,8 @@
 /**
  * Main Responsibility: Document review page — preview uploaded file and edit proposed fields.
  *
- * Loads GET /documents/{id} and GET /categories. File preview uses authenticated
+ * Loads GET /documents/{id} and GET /categories. The receipt category dropdown
+ * lists top-level groups only. File preview uses authenticated
  * blob fetch (img/iframe cannot send Bearer). Actions: approve (REVIEW_REQUIRED
  * only → expenses list), delete pending, retry processing, continue manually after failure.
  */
@@ -143,7 +144,9 @@ export function renderReviewPage(root, documentId) {
   }
 
   function populateCategoryOptions(categories) {
-    const options = categories
+    // Whole-receipt category is a group. Leaves are chosen on a line later.
+    const groups = categories.filter((category) => category.parentId == null);
+    const options = groups
       .map((category) => `<option value="${category.id}">${category.name}</option>`)
       .join('');
     categorySelectEl.insertAdjacentHTML('beforeend', options);

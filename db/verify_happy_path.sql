@@ -1,4 +1,4 @@
--- Main Responsibility: Happy-path verification after 001 + 002 + 003 migrations.
+-- Main Responsibility: Happy-path verification after 001 + 002 + 003 + 004 migrations.
 -- Fails with RAISE EXCEPTION when an expectation is not met.
 -- Run with: psql ... -v ON_ERROR_STOP=1 -f db/verify_happy_path.sql
 
@@ -11,6 +11,10 @@ DECLARE
     category_count INTEGER;
     inactive_count INTEGER;
     missing_slug_count INTEGER;
+    top_level_count INTEGER;
+    leaf_count INTEGER;
+    bad_parent_count INTEGER;
+    nested_leaf_count INTEGER;
     expenses_currency_ok BOOLEAN;
     extractions_currency_ok BOOLEAN;
 BEGIN
@@ -50,8 +54,62 @@ BEGIN
     INTO category_count
     FROM categories;
 
-    IF category_count <> 10 THEN
-        RAISE EXCEPTION 'Expected 10 seeded categories, found %', category_count;
+    -- 10 original groups + 5 new groups + 12 leaves (004).
+    IF category_count <> 27 THEN
+        RAISE EXCEPTION 'Expected 27 seeded categories, found %', category_count;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO top_level_count
+    FROM categories
+    WHERE parent_id IS NULL;
+
+    IF top_level_count <> 15 THEN
+        RAISE EXCEPTION 'Expected 15 top-level categories, found %', top_level_count;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO leaf_count
+    FROM categories
+    WHERE parent_id IS NOT NULL;
+
+    IF leaf_count <> 12 THEN
+        RAISE EXCEPTION 'Expected 12 category leaves, found %', leaf_count;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO bad_parent_count
+    FROM (
+        VALUES
+            ('meat', 'food'),
+            ('deli', 'food'),
+            ('sweets', 'food'),
+            ('alcohol', 'food'),
+            ('produce', 'food'),
+            ('dairy', 'food'),
+            ('bakery', 'food'),
+            ('toiletries', 'household'),
+            ('cleaning', 'household'),
+            ('fuel', 'transport'),
+            ('public-transport', 'transport'),
+            ('pharmacy', 'health')
+    ) AS expected(child_slug, parent_slug)
+    LEFT JOIN categories child ON child.slug = expected.child_slug
+    LEFT JOIN categories parent ON parent.slug = expected.parent_slug
+    WHERE child.parent_id IS DISTINCT FROM parent.id;
+
+    IF bad_parent_count <> 0 THEN
+        RAISE EXCEPTION 'Expected every leaf to point at its parent slug, found % mismatches', bad_parent_count;
+    END IF;
+
+    SELECT COUNT(*)
+    INTO nested_leaf_count
+    FROM categories child
+    JOIN categories parent ON child.parent_id = parent.id
+    WHERE parent.parent_id IS NOT NULL;
+
+    IF nested_leaf_count <> 0 THEN
+        RAISE EXCEPTION 'Expected one category level only, found % nested leaves', nested_leaf_count;
     END IF;
 
     SELECT COUNT(*)
@@ -76,7 +134,24 @@ BEGIN
             ('utilities'),
             ('travel'),
             ('education'),
-            ('other')
+            ('other'),
+            ('household'),
+            ('eating-out'),
+            ('insurance'),
+            ('subscriptions'),
+            ('sport'),
+            ('meat'),
+            ('deli'),
+            ('sweets'),
+            ('alcohol'),
+            ('produce'),
+            ('dairy'),
+            ('bakery'),
+            ('toiletries'),
+            ('cleaning'),
+            ('fuel'),
+            ('public-transport'),
+            ('pharmacy')
     ) AS expected(slug)
     LEFT JOIN categories c ON c.slug = expected.slug
     WHERE c.slug IS NULL;

@@ -54,3 +54,13 @@
 13. Later UI idea: click a line item → highlight/outline that text on the receipt
     image using OCR bounding boxes (bbox). Needs saved line geometry, not just
     header text. Out of current MVP.
+14. Reports: a pie chart for one parent category (for example Food), with the
+    slices as that parent's subcategories and their share of the parent total
+    (Sweets, Meat, Alcohol, Vegetables, and so on). Percentages are of that
+    parent, not of all spending. Line amounts roll up to their own parent.
+    Remainder = expense total − sum of that expense's lines. A positive
+    remainder is an "unallocated" slice under the expense's top-level category,
+    not a second copy of the full total. If lines sum to more than the total,
+    do not draw a negative slice; the review/detail warning stays. Receipts
+    with no lines contribute their whole total to the expense category and
+    have no subcategory slices.

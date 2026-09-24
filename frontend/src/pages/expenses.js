@@ -2,6 +2,7 @@
  * Main Responsibility: Expenses list page — filtered list of saved expenses.
  *
  * Loads GET /expenses with optional from/to/categoryId/merchant (AND-combined).
+ * The category filter lists top-level groups only (empty parentId).
  * Distinguishes true-empty (upload CTA) from filtered-empty (clear filters).
  * After unapprove, shows a short notice with a link to the pending inbox.
  * Login required.
@@ -115,7 +116,9 @@ export function renderExpensesPage(root) {
   async function loadCategories() {
     try {
       const categories = await api('/categories');
-      const options = categories
+      // Expense header filter: groups only, not leaves such as Meat.
+      const groups = categories.filter((category) => category.parentId == null);
+      const options = groups
         .map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`)
         .join('');
       categorySelectEl.insertAdjacentHTML('beforeend', options);

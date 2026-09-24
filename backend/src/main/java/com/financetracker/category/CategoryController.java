@@ -29,7 +29,8 @@ public class CategoryController {
                 .map(category -> new CategoryResponse(
                         category.getId(),
                         category.getName(),
-                        category.getSlug()))
+                        category.getSlug(),
+                        category.getParentId()))
                 .toList();
     }
 }

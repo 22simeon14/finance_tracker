@@ -273,7 +273,7 @@ Unknown hashes fall through to home.
 | `POST` | `/auth/register` | Public | `201` `{ token }` |
 | `POST` | `/auth/login` | Public | `200` `{ token }` |
 | `GET` | `/auth/me` | JWT | `{ id, email }` |
-| `GET` | `/categories` | JWT | Active categories `{ id, name, slug }` |
+| `GET` | `/categories` | JWT | Active categories `{ id, name, slug, parentId }` |
 | `POST` | `/documents` | JWT | `201` review DTO (after sync processing) |
 | `GET` | `/documents?status=pending` | JWT | `200` slim inbox rows (`DocumentResponse[]`); only `pending` supported; missing/unknown status → `400` |
 | `GET` | `/documents/{id}` | JWT | Review DTO |
@@ -569,7 +569,7 @@ sequenceDiagram
 
 ## 8. Data model
 
-PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`001` schema, `002` category seed, `003` EUR-only currency checks). On a fresh Compose volume, Postgres runs those files in name order once. **`001` alone still allows EUR/USD/GBP**; **`003` is required for EUR-only**. Seeded categories: `db/migrations/002_seed_categories.sql` (Food & Drink, Transport, Shopping, Housing, Health, Entertainment, Utilities, Travel, Education, Other).
+PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`001` schema, `002` category seed, `003` EUR-only currency checks, `004` category `parent_id` and extra groups/leaves). On a fresh Compose volume, Postgres runs those files in name order once. **`001` alone still allows EUR/USD/GBP**; **`003` is required for EUR-only**. `002` seeds the original ten groups. `004` adds Household, Eating out, Insurance, Subscriptions, and Sport. Eating out, Insurance, Subscriptions, and Sport have no children. Leaves sit under Food, Household, Transport, and Health. `parent_id` null is a top-level group; a set `parent_id` is a leaf.
 
 ### Table responsibilities
 
@@ -578,7 +578,7 @@ PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`0
 | `users` | Auth identity (`email`, `password_hash`) |
 | `documents` | Uploaded file metadata + processing status |
 | `document_extractions` | Untrusted proposed fields for review (at most one per document) |
-| `categories` | Reusable labels; inactive kept for history but not for new picks |
+| `categories` | Reusable labels; `parent_id` null is a group, set is a leaf; inactive kept for history but not for new picks |
 | `expenses` | User-approved financial record; source of truth for list/dashboard |
 
 Expense ownership: `expenses.document_id → documents.user_id` (no `expenses.user_id`). No `users.role`.

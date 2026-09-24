@@ -4,7 +4,7 @@
  * Shows login/register links when logged out, or email + dashboard / expenses /
  * pending inbox / upload + logout when logged in. After a successful /auth/me,
  * loads GET /categories (JWT-protected)
- * and lists names. Health uses plain fetch("/health") (proxied by Vite) instead of
+ * and lists top-level group names (parentId empty). Health uses plain fetch("/health") (proxied by Vite) instead of
  * api(), because it is public and does not need a Bearer token.
  */
 import { api } from '../api.js';
@@ -59,8 +59,9 @@ export function renderHomePage(root) {
     try {
       const categories = await api('/categories');
       categoriesStatusEl.textContent = '';
-      // Simple name list — proof that the JWT-protected endpoint works from the UI.
-      categoriesListEl.innerHTML = categories
+      // Groups only. Leaves (Meat, Toiletries, …) stay off this proof list.
+      const groups = categories.filter((category) => category.parentId == null);
+      categoriesListEl.innerHTML = groups
         .map((category) => `<li>${category.name}</li>`)
         .join('');
     } catch (error) {

@@ -71,6 +71,10 @@ class ApiIntegrationTest {
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("db/migrations/003_currency_eur_only.sql"),
                     "/docker-entrypoint-initdb.d/003_currency_eur_only.sql"
+            )
+            .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("db/migrations/004_category_parent.sql"),
+                    "/docker-entrypoint-initdb.d/004_category_parent.sql"
             );
 
     /**

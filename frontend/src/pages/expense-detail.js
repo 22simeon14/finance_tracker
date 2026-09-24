@@ -1,7 +1,8 @@
 /**
  * Main Responsibility: Expense detail page — preview, edit fields, and unapprove.
  *
- * Loads GET /expenses/{id} and GET /categories. Save uses PUT /expenses/{id}.
+ * Loads GET /expenses/{id} and GET /categories. The category dropdown lists
+ * top-level groups only. Save uses PUT /expenses/{id}.
  * Unapprove uses DELETE /expenses/{id} (expense gone; document → pending inbox),
  * then navigates to #/expenses with a short notice. Preview uses authenticated blob fetch.
  */
@@ -139,13 +140,15 @@ export function renderExpenseDetailPage(root, expenseId) {
   }
 
   function populateCategoryOptions(categories, expense) {
-    const options = categories
+    // Whole-expense category is a group. Leaves are chosen on a line later.
+    const groups = categories.filter((category) => category.parentId == null);
+    const options = groups
       .map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`)
       .join('');
     categorySelectEl.insertAdjacentHTML('beforeend', options);
 
     // If the saved category is inactive it won't be in GET /categories — keep it selectable for display.
-    const ids = new Set(categories.map((category) => String(category.id)));
+    const ids = new Set(groups.map((category) => String(category.id)));
     if (expense.categoryId != null && !ids.has(String(expense.categoryId))) {
       const label = expense.categoryName
         ? `${expense.categoryName} (inactive)`

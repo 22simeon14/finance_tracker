@@ -70,7 +70,9 @@ public class ExtractionPipeline {
     }
 
     private List<CategoryOption> loadActiveCategories() {
+        // The receipt header is a top-level group. Leaves are not offered here.
         return categoryRepository.findByIsActiveTrueOrderByNameAsc().stream()
+                .filter(category -> category.getParentId() == null)
                 .map(this::toCategoryOption)
                 .toList();
     }

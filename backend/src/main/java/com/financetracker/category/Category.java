@@ -29,6 +29,10 @@ public class Category {
     @Column(nullable = false, unique = true, length = 100)
     private String slug;
 
+    // Null = top-level group (expense header). Set = leaf under that group.
+    @Column(name = "parent_id")
+    private Long parentId;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
@@ -58,6 +62,14 @@ public class Category {
 
     public void setSlug(String slug) {
         this.slug = slug;
+    }
+
+    public Long getParentId() {
+        return parentId;
+    }
+
+    public void setParentId(Long parentId) {
+        this.parentId = parentId;
     }
 
     public boolean isActive() {
