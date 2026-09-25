@@ -2,14 +2,17 @@ package com.financetracker.document;
 
 import com.financetracker.document.extraction.ExtractionPipeline;
 import com.financetracker.document.extraction.ExtractionResult;
+import com.financetracker.document.extraction.LineItemProposal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -20,7 +23,7 @@ import java.util.Set;
  * REVIEW_REQUIRED / PROCESSING_FAILED), pending inbox list, review GET / file stream /
  * pending DELETE, and cleanup when the DB save fails after the file is already on disk.
  * Extraction itself is delegated to ExtractionPipeline; this class maps results to
- * document_extractions and never creates expenses.
+ * document_extractions + document_extraction_lines and never creates expenses.
  */
 @Service
 public class DocumentService {
@@ -41,17 +44,20 @@ public class DocumentService {
 
     private final DocumentRepository documentRepository;
     private final DocumentExtractionRepository documentExtractionRepository;
+    private final DocumentExtractionLineRepository documentExtractionLineRepository;
     private final FileStorageService fileStorageService;
     private final ExtractionPipeline extractionPipeline;
 
     public DocumentService(
             DocumentRepository documentRepository,
             DocumentExtractionRepository documentExtractionRepository,
+            DocumentExtractionLineRepository documentExtractionLineRepository,
             FileStorageService fileStorageService,
             ExtractionPipeline extractionPipeline
     ) {
         this.documentRepository = documentRepository;
         this.documentExtractionRepository = documentExtractionRepository;
+        this.documentExtractionLineRepository = documentExtractionLineRepository;
         this.fileStorageService = fileStorageService;
         this.extractionPipeline = extractionPipeline;
     }
@@ -59,7 +65,9 @@ public class DocumentService {
     /**
      * Validate the multipart file, store it on disk, create the DB row, then run extraction
      * in the same request so the response status is already post-processing.
+     * Transactional so header + line-item writes commit together.
      */
+    @Transactional
     public DocumentReviewResponse uploadDocument(Long userId, MultipartFile file) {
         validateFile(file);
 
@@ -100,7 +108,9 @@ public class DocumentService {
     /**
      * Re-run extraction. Allowed only from UPLOADED or PROCESSING_FAILED.
      * Wrong owner → 404; illegal status → 409.
+     * Transactional so header + line-item writes commit together.
      */
+    @Transactional
     public DocumentReviewResponse process(Long userId, Long documentId) {
         Document document = findOwnedDocument(userId, documentId);
         String status = document.getStatus();
@@ -121,9 +131,10 @@ public class DocumentService {
     }
 
     /**
-     * From PROCESSING_FAILED: create/clear an empty extraction row and move to REVIEW_REQUIRED
-     * so the user can fill the review form by hand.
+     * From PROCESSING_FAILED: create/clear an empty extraction row (and its lines)
+     * and move to REVIEW_REQUIRED so the user can fill the review form by hand.
      */
+    @Transactional
     public DocumentReviewResponse continueManual(Long userId, Long documentId) {
         Document document = findOwnedDocument(userId, documentId);
 
@@ -142,7 +153,8 @@ public class DocumentService {
                     return created;
                 });
         clearProposedFields(extraction);
-        documentExtractionRepository.save(extraction);
+        DocumentExtraction savedExtraction = documentExtractionRepository.save(extraction);
+        replaceLineItems(savedExtraction.getId(), List.of());
 
         document.setStatus(STATUS_REVIEW_REQUIRED);
         documentRepository.save(document);
@@ -240,7 +252,8 @@ public class DocumentService {
                         return created;
                     });
             applyExtractionResult(extraction, result);
-            documentExtractionRepository.save(extraction);
+            DocumentExtraction savedExtraction = documentExtractionRepository.save(extraction);
+            replaceLineItems(savedExtraction.getId(), result.lineItems());
 
             document.setStatus(STATUS_REVIEW_REQUIRED);
             documentRepository.save(document);
@@ -263,7 +276,7 @@ public class DocumentService {
         }
     }
 
-    /** Copy validated header fields onto the extraction entity (line items ignored). */
+    /** Copy validated header fields onto the extraction entity. */
     private static void applyExtractionResult(DocumentExtraction extraction, ExtractionResult result) {
         extraction.setRawOcrText(result.rawOcrText());
         extraction.setProposedMerchant(result.merchant());
@@ -273,7 +286,7 @@ public class DocumentService {
         extraction.setProposedCategoryId(result.categoryId());
     }
 
-    /** Clear all proposed fields (manual-continue empty form / failed cleanup). */
+    /** Clear all proposed header fields (manual-continue empty form / failed cleanup). */
     private static void clearProposedFields(DocumentExtraction extraction) {
         extraction.setRawOcrText(null);
         extraction.setProposedMerchant(null);
@@ -281,6 +294,44 @@ public class DocumentService {
         extraction.setProposedAmount(null);
         extraction.setProposedCurrency(null);
         extraction.setProposedCategoryId(null);
+    }
+
+    /**
+     * Replace all lines for an extraction with the given proposals (empty list clears).
+     * Call after the extraction row is saved so extractionId is present.
+     */
+    private void replaceLineItems(Long extractionId, List<LineItemProposal> lineItems) {
+        documentExtractionLineRepository.deleteByExtractionId(extractionId);
+        // Flush deletes before inserts so UNIQUE (extraction_id, position) is free.
+        documentExtractionLineRepository.flush();
+
+        if (lineItems == null || lineItems.isEmpty()) {
+            return;
+        }
+
+        List<DocumentExtractionLine> rows = new ArrayList<>(lineItems.size());
+        for (int i = 0; i < lineItems.size(); i++) {
+            LineItemProposal proposal = lineItems.get(i);
+            DocumentExtractionLine row = new DocumentExtractionLine();
+            row.setExtractionId(extractionId);
+            row.setDescription(truncateDescription(proposal.description()));
+            row.setAmount(proposal.amount());
+            row.setCategoryId(proposal.categoryId());
+            row.setPosition(i);
+            rows.add(row);
+        }
+        documentExtractionLineRepository.saveAll(rows);
+    }
+
+    /** Fit VARCHAR(255); validator already requires a non-blank description. */
+    private static String truncateDescription(String description) {
+        if (description == null) {
+            return "";
+        }
+        if (description.length() <= 255) {
+            return description;
+        }
+        return description.substring(0, 255);
     }
 
     /**
@@ -306,7 +357,8 @@ public class DocumentService {
     private void clearExtractionIfPresent(Long documentId) {
         documentExtractionRepository.findByDocumentId(documentId).ifPresent(extraction -> {
             clearProposedFields(extraction);
-            documentExtractionRepository.save(extraction);
+            DocumentExtraction saved = documentExtractionRepository.save(extraction);
+            replaceLineItems(saved.getId(), List.of());
         });
     }
 
@@ -376,13 +428,24 @@ public class DocumentService {
     }
 
     private ExtractionResponse toExtractionResponse(DocumentExtraction extraction) {
+        List<ExtractionLineResponse> lineItems = documentExtractionLineRepository
+                .findByExtractionIdOrderByPositionAsc(extraction.getId())
+                .stream()
+                .map(line -> new ExtractionLineResponse(
+                        line.getDescription(),
+                        line.getAmount(),
+                        line.getCategoryId()
+                ))
+                .toList();
+
         return new ExtractionResponse(
                 extraction.getRawOcrText(),
                 extraction.getProposedMerchant(),
                 extraction.getProposedDate(),
                 extraction.getProposedAmount(),
                 extraction.getProposedCurrency(),
-                extraction.getProposedCategoryId()
+                extraction.getProposedCategoryId(),
+                lineItems
         );
     }
 

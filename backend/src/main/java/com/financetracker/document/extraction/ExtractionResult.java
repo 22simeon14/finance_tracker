@@ -7,8 +7,8 @@ import java.util.List;
 /**
  * Main Responsibility: Header and line-item proposals from OCR + LLM parse.
  *
- * lineItems live in memory for this step; DocumentService still persists only
- * header fields onto document_extractions until a later migration.
+ * DocumentService maps headers onto document_extractions and lineItems onto
+ * document_extraction_lines for the review JSON.
  */
 public record ExtractionResult(
         String rawOcrText,
