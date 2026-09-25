@@ -1,0 +1,203 @@
+/**
+ * Main Responsibility: Client-side Items card for the review page.
+ *
+ * Owns line-item list state, optgroup category selects, add/remove rows, and
+ * the lines-vs-receipt total mismatch note. Edits stay in memory until Approve
+ * sends them (wired in a later step). Used only by review.js.
+ */
+
+/** Local counter so each in-memory line has a stable DOM key before save. */
+let nextLineKey = 1;
+
+/**
+ * Wire the Items section DOM. Call setCategories once categories load, then
+ * loadFromExtraction whenever the document / extraction is refreshed.
+ */
+export function createReviewItemsEditor({
+  listEl,
+  sumEl,
+  mismatchEl,
+  addBtn,
+  amountInputEl,
+  currency,
+}) {
+  let categories = [];
+  let lineItems = [];
+
+  addBtn.addEventListener('click', () => {
+    lineItems.push({ key: nextLineKey++, description: '', amount: '', categoryId: null });
+    render();
+  });
+
+  amountInputEl.addEventListener('input', updateTotals);
+
+  // Capture edits from line rows without rebinding after each re-render.
+  listEl.addEventListener('input', (event) => {
+    const row = event.target.closest('[data-line-key]');
+    if (!row) {
+      return;
+    }
+    const item = lineItems.find((line) => line.key === Number(row.dataset.lineKey));
+    if (!item) {
+      return;
+    }
+    const field = event.target.name;
+    if (field === 'description') {
+      item.description = event.target.value;
+    } else if (field === 'amount') {
+      item.amount = event.target.value;
+      updateTotals();
+    } else if (field === 'categoryId') {
+      item.categoryId = event.target.value ? Number(event.target.value) : null;
+    }
+  });
+
+  listEl.addEventListener('click', (event) => {
+    const removeBtn = event.target.closest('[data-remove-line]');
+    if (!removeBtn) {
+      return;
+    }
+    const key = Number(removeBtn.dataset.removeLine);
+    lineItems = lineItems.filter((item) => item.key !== key);
+    render();
+  });
+
+  function setCategories(nextCategories) {
+    categories = nextCategories;
+  }
+
+  /** Replace in-memory lines from the server proposal (discards unsaved edits). */
+  function loadFromExtraction(proposals) {
+    lineItems = (proposals ?? []).map((line) => ({
+      key: nextLineKey++,
+      description: line.description ?? '',
+      amount: line.amount != null ? String(line.amount) : '',
+      categoryId: line.categoryId ?? null,
+    }));
+    render();
+  }
+
+  function render() {
+    if (lineItems.length === 0) {
+      listEl.innerHTML =
+        '<p class="review-items-empty">No line items yet. Add a product row if you want a breakdown.</p>';
+      updateTotals();
+      return;
+    }
+
+    const categoryOptionsHtml = buildLineCategoryOptionsHtml(categories);
+    listEl.innerHTML = lineItems
+      .map((item) => `
+        <div class="review-item-row" data-line-key="${item.key}">
+          <label class="review-item-field">
+            <span class="review-item-label">Description</span>
+            <input type="text" name="description" autocomplete="off"
+              value="${escapeHtml(item.description)}" />
+          </label>
+          <label class="review-item-field">
+            <span class="review-item-label">Amount</span>
+            <input type="number" name="amount" step="0.01" min="0"
+              value="${escapeHtml(item.amount)}" />
+          </label>
+          <label class="review-item-field">
+            <span class="review-item-label">Category</span>
+            <select name="categoryId">
+              <option value="">— Select —</option>
+              ${categoryOptionsHtml}
+            </select>
+          </label>
+          <button type="button" class="review-item-remove" data-remove-line="${item.key}"
+            aria-label="Remove item">Remove</button>
+        </div>
+      `)
+      .join('');
+
+    // Restore selected category after rebuild (options HTML has no selected attrs).
+    for (const item of lineItems) {
+      const row = listEl.querySelector(`[data-line-key="${item.key}"]`);
+      const select = row?.querySelector('select[name="categoryId"]');
+      if (select && item.categoryId != null) {
+        select.value = String(item.categoryId);
+      }
+    }
+
+    updateTotals();
+  }
+
+  function updateTotals() {
+    const linesSum = lineItems.reduce((sum, item) => {
+      const value = Number(item.amount);
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+    const receiptTotal = Number(amountInputEl.value);
+    const receiptLabel = Number.isFinite(receiptTotal) && amountInputEl.value !== ''
+      ? formatMoney(receiptTotal)
+      : '—';
+
+    sumEl.textContent =
+      `Lines: ${formatMoney(linesSum)} ${currency} · Receipt: ${receiptLabel} ${currency}`;
+
+    // Empty list is fine (whole total stays on the receipt). Warn only when
+    // there are rows and their sum does not match the receipt amount.
+    const hasLines = lineItems.length > 0;
+    const receiptOk = Number.isFinite(receiptTotal) && amountInputEl.value !== '';
+    const mismatch = hasLines && receiptOk && !amountsEqual(linesSum, receiptTotal);
+    if (mismatch) {
+      mismatchEl.textContent =
+        'Line items and receipt total differ. That can be a discount, deposit, or tip — Approve is still allowed.';
+      mismatchEl.hidden = false;
+    } else {
+      mismatchEl.hidden = true;
+      mismatchEl.textContent = '';
+    }
+  }
+
+  return { setCategories, loadFromExtraction };
+}
+
+/**
+ * Groups with leaves become optgroups; childless groups are plain options
+ * so a line can still pick e.g. Shopping when it has no leaves.
+ */
+function buildLineCategoryOptionsHtml(categories) {
+  const groups = categories.filter((category) => category.parentId == null);
+  const leaves = categories.filter((category) => category.parentId != null);
+  const parts = [];
+
+  for (const group of groups) {
+    const children = leaves.filter((leaf) => leaf.parentId === group.id);
+    if (children.length === 0) {
+      parts.push(
+        `<option value="${group.id}">${escapeHtml(group.name)}</option>`,
+      );
+      continue;
+    }
+    const options = children
+      .map((leaf) => `<option value="${leaf.id}">${escapeHtml(leaf.name)}</option>`)
+      .join('');
+    parts.push(
+      `<optgroup label="${escapeHtml(group.name)}">${options}</optgroup>`,
+    );
+  }
+
+  return parts.join('');
+}
+
+function formatMoney(value) {
+  return value.toFixed(2);
+}
+
+/** Compare money with cents so 12.1 and 12.10 do not look different. */
+function amountsEqual(a, b) {
+  return Math.round(a * 100) === Math.round(b * 100);
+}
+
+/** Escape text before inserting into HTML attribute or element content. */
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}

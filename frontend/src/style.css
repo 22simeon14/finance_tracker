@@ -101,15 +101,81 @@
 
   .review-preview,
   .review-form-section,
+  .review-items,
   .expense-detail-fields {
     @apply rounded-xl border border-app-border bg-app-card p-5 shadow-sm;
   }
 
+  /* Items sit under both columns; left edge lines up with the preview card. */
+  .review-items {
+    @apply min-w-0 min-[721px]:col-span-2;
+  }
+
   .review-preview h2,
   .review-form-section h2,
+  .review-items h2,
   .expense-detail-fields h2,
   .dashboard-section h2 {
     @apply mt-0 text-lg;
+  }
+
+  .status-pill {
+    @apply ml-2 inline-block align-middle rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide;
+  }
+
+  .status-pill--review {
+    @apply bg-emerald-100 text-app-ok;
+  }
+
+  .status-pill--failed {
+    @apply bg-red-100 text-app-danger;
+  }
+
+  .status-pill--muted {
+    @apply bg-neutral-200 text-app-muted;
+  }
+
+  .review-items-empty {
+    @apply m-0 text-sm text-app-muted;
+  }
+
+  /* Wide: description | amount | category | remove. Narrow: stack fields.
+     min-w-0 keeps long selects from pushing the row past the card. */
+  .review-item-row {
+    @apply mb-3 grid min-w-0 grid-cols-1 items-end gap-3 border-b border-app-divider pb-3 last:mb-0 last:border-b-0 last:pb-0 min-[721px]:grid-cols-[minmax(0,1fr)_7rem_minmax(0,12rem)_auto];
+  }
+
+  .review-item-field {
+    @apply flex min-w-0 flex-col gap-1.5 font-semibold;
+  }
+
+  .review-item-label {
+    @apply text-sm text-app-muted;
+  }
+
+  .review-item-field input,
+  .review-item-field select {
+    @apply w-full min-w-0 rounded-md border border-app-input bg-app-card px-3 py-2 font-[inherit] font-normal shadow-sm outline-none focus:border-app-link focus:ring-2 focus:ring-app-link/20;
+  }
+
+  .review-item-remove {
+    @apply mt-0 shrink-0 border-app-danger text-app-danger hover:bg-red-50 min-[721px]:mb-0.5;
+  }
+
+  .review-items-footer {
+    @apply mt-4 flex flex-col gap-3;
+  }
+
+  .review-items-footer > button {
+    @apply mt-0 w-fit;
+  }
+
+  .review-items-sum {
+    @apply m-0 text-sm text-app-muted;
+  }
+
+  .review-items-mismatch {
+    @apply mt-2 mb-0 rounded-xl border border-app-warn-border bg-app-warn px-4 py-3.5 text-sm text-app-warn-ink;
   }
 
   .preview-container {
@@ -147,6 +213,11 @@
 
   .review-actions button {
     @apply mt-0;
+  }
+
+  /* Filled primary — used only for Approve on the review page. */
+  .button-primary {
+    @apply border-transparent bg-app-link text-white hover:bg-blue-700;
   }
 
   .button-danger {

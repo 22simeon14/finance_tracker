@@ -2,13 +2,14 @@
  * Main Responsibility: Document review page — preview uploaded file and edit proposed fields.
  *
  * Loads GET /documents/{id} and GET /categories. The receipt category dropdown
- * lists top-level groups only. File preview uses authenticated
- * blob fetch (img/iframe cannot send Bearer). Actions: approve (REVIEW_REQUIRED
- * only → expenses list), delete pending, retry processing, continue manually after failure.
+ * lists top-level groups only. Line items live in review-items.js. File preview
+ * uses authenticated blob fetch. Actions: approve (REVIEW_REQUIRED only →
+ * expenses list), delete pending, retry processing, continue manually after failure.
  */
 import { api, apiBlob } from '../api.js';
 import { isLoggedIn } from '../auth.js';
 import { navigate } from '../router.js';
+import { createReviewItemsEditor } from './review-items.js';
 
 /** Product is EUR-only; column stays, UI no longer offers USD/GBP. */
 const CURRENCY = 'EUR';
@@ -73,10 +74,23 @@ export function renderReviewPage(root, documentId) {
           </div>
 
           <div class="review-actions">
-            <button type="button" id="approve-btn" hidden>Approve</button>
+            <button type="button" id="approve-btn" class="button-primary" hidden>Approve</button>
             <button type="button" id="delete-btn" class="button-danger">Delete pending document</button>
           </div>
           <p id="review-action-status" class="categories-status"></p>
+        </section>
+
+        <!-- Full-width under preview+form so the left edge matches the receipt card. -->
+        <section class="review-items" aria-labelledby="review-items-heading">
+          <h2 id="review-items-heading">Items</h2>
+          <div id="review-items-list"></div>
+          <div class="review-items-footer">
+            <button type="button" id="add-item-btn">Add item</button>
+            <div class="review-items-totals">
+              <p id="review-items-sum" class="review-items-sum"></p>
+              <p id="review-items-mismatch" class="review-items-mismatch" hidden></p>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -96,6 +110,7 @@ export function renderReviewPage(root, documentId) {
   const formNoteEl = root.querySelector('#review-form-note');
   const formEl = root.querySelector('#review-form');
   const categorySelectEl = formEl.querySelector('select[name="categoryId"]');
+  const amountInputEl = formEl.querySelector('input[name="amount"]');
   const failedActionsEl = root.querySelector('#review-failed-actions');
   const retryBtn = root.querySelector('#retry-btn');
   const continueManualBtn = root.querySelector('#continue-manual-btn');
@@ -103,7 +118,14 @@ export function renderReviewPage(root, documentId) {
   const deleteBtn = root.querySelector('#delete-btn');
   const actionStatusEl = root.querySelector('#review-action-status');
 
-  let currentDocument = null;
+  const itemsEditor = createReviewItemsEditor({
+    listEl: root.querySelector('#review-items-list'),
+    sumEl: root.querySelector('#review-items-sum'),
+    mismatchEl: root.querySelector('#review-items-mismatch'),
+    addBtn: root.querySelector('#add-item-btn'),
+    amountInputEl,
+    currency: CURRENCY,
+  });
 
   retryBtn.addEventListener('click', () => runAction('retry'));
   continueManualBtn.addEventListener('click', () => runAction('continue-manual'));
@@ -124,7 +146,7 @@ export function renderReviewPage(root, documentId) {
         api('/categories'),
       ]);
 
-      currentDocument = document;
+      itemsEditor.setCategories(categories);
       populateCategoryOptions(categories);
       applyDocumentToUi(document);
       await loadPreview(document);
@@ -144,16 +166,18 @@ export function renderReviewPage(root, documentId) {
   }
 
   function populateCategoryOptions(categories) {
-    // Whole-receipt category is a group. Leaves are chosen on a line later.
+    // Whole-receipt category is a group. Leaves are chosen on a line below.
     const groups = categories.filter((category) => category.parentId == null);
     const options = groups
-      .map((category) => `<option value="${category.id}">${category.name}</option>`)
+      .map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`)
       .join('');
     categorySelectEl.insertAdjacentHTML('beforeend', options);
   }
 
   function applyDocumentToUi(document) {
-    statusLineEl.textContent = `${document.originalFilename} — ${document.status}`;
+    statusLineEl.innerHTML =
+      `${escapeHtml(document.originalFilename)} `
+      + `<span class="status-pill ${statusPillClass(document.status)}">${escapeHtml(statusLabel(document.status))}</span>`;
     fileMetaEl.textContent =
       `${document.mimeType}, ${formatBytes(document.fileSizeBytes)}`;
 
@@ -165,6 +189,8 @@ export function renderReviewPage(root, documentId) {
     formEl.querySelector('[name="currency"]').value = CURRENCY;
     categorySelectEl.value =
       extraction?.proposedCategoryId != null ? String(extraction.proposedCategoryId) : '';
+
+    itemsEditor.loadFromExtraction(extraction?.lineItems);
 
     const isFailed = document.status === 'PROCESSING_FAILED';
     const canApprove = document.status === 'REVIEW_REQUIRED';
@@ -199,13 +225,14 @@ export function renderReviewPage(root, documentId) {
         return;
       }
       previewContainerEl.innerHTML =
-        `<p class="preview-placeholder preview-placeholder--error">${error.message || 'Preview unavailable'}</p>`;
+        `<p class="preview-placeholder preview-placeholder--error">${escapeHtml(error.message || 'Preview unavailable')}</p>`;
     }
   }
 
   /**
    * POST confirmed form fields to approve. Client checks required fields first;
    * backend remains the authority for validation and status rules.
+   * Line items stay local for now; a later step will send them with Approve.
    */
   async function runApprove() {
     errorEl.hidden = true;
@@ -280,7 +307,6 @@ export function renderReviewPage(root, documentId) {
           : `/documents/${documentId}/continue-manual`;
 
       const document = await api(path, { method: 'POST' });
-      currentDocument = document;
       applyDocumentToUi(document);
       actionStatusEl.textContent =
         action === 'retry' ? 'Processing retried.' : 'Ready for manual entry.';
@@ -303,7 +329,7 @@ function buildPreviewElement(mimeType, objectUrl) {
   if (mimeType === 'image/jpeg' || mimeType === 'image/png') {
     return `<img class="preview-image" src="${objectUrl}" alt="Document preview" />`;
   }
-  return `<p class="preview-placeholder">Preview not supported for ${mimeType}</p>`;
+  return `<p class="preview-placeholder">Preview not supported for ${escapeHtml(mimeType)}</p>`;
 }
 
 function formatBytes(bytes) {
@@ -314,6 +340,36 @@ function formatBytes(bytes) {
     return `${bytes} B`;
   }
   return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function statusLabel(status) {
+  if (status === 'REVIEW_REQUIRED') {
+    return 'Ready for review';
+  }
+  if (status === 'PROCESSING_FAILED') {
+    return 'Failed';
+  }
+  return status;
+}
+
+function statusPillClass(status) {
+  if (status === 'REVIEW_REQUIRED') {
+    return 'status-pill--review';
+  }
+  if (status === 'PROCESSING_FAILED') {
+    return 'status-pill--failed';
+  }
+  return 'status-pill--muted';
+}
+
+/** Escape text before inserting into HTML attribute or element content. */
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function revokeActivePreviewUrl() {

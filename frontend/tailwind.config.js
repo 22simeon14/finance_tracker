@@ -21,6 +21,10 @@ export default {
         'app-notice': '#eef6ff',
         'app-notice-border': '#b6d4fe',
         'app-notice-ink': '#1a3a5c',
+        // Yellow band when line-item sum ≠ receipt total (discount / deposit).
+        'app-warn': '#fff8e1',
+        'app-warn-border': '#e6c200',
+        'app-warn-ink': '#5c4a00',
         'app-input': '#cccccc',
         'app-preview': '#f9fafb',
         'app-divider': '#eeeeee',
