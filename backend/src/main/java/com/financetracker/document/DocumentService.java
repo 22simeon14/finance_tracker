@@ -315,6 +315,8 @@ public class DocumentService {
             DocumentExtractionLine row = new DocumentExtractionLine();
             row.setExtractionId(extractionId);
             row.setDescription(truncateDescription(proposal.description()));
+            row.setQuantity(proposal.quantity());
+            row.setUnitPrice(proposal.unitPrice());
             row.setAmount(proposal.amount());
             row.setCategoryId(proposal.categoryId());
             row.setPosition(i);
@@ -433,6 +435,8 @@ public class DocumentService {
                 .stream()
                 .map(line -> new ExtractionLineResponse(
                         line.getDescription(),
+                        line.getQuantity(),
+                        line.getUnitPrice(),
                         line.getAmount(),
                         line.getCategoryId()
                 ))

@@ -84,6 +84,10 @@ class DocumentExtractionLinesIntegrationTest {
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("db/migrations/005_document_extraction_lines.sql"),
                     "/docker-entrypoint-initdb.d/005_document_extraction_lines.sql"
+            )
+            .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("db/migrations/006_extraction_line_qty_unit_price.sql"),
+                    "/docker-entrypoint-initdb.d/006_extraction_line_qty_unit_price.sql"
             );
 
     @DynamicPropertySource
@@ -136,9 +140,13 @@ class DocumentExtractionLinesIntegrationTest {
                 .andExpect(jsonPath("$.extraction.proposedMerchant").value("Lidl"))
                 .andExpect(jsonPath("$.extraction.lineItems.length()").value(2))
                 .andExpect(jsonPath("$.extraction.lineItems[0].description").value("Minced meat"))
+                .andExpect(jsonPath("$.extraction.lineItems[0].quantity").value(1.0))
+                .andExpect(jsonPath("$.extraction.lineItems[0].unitPrice").value(8.0))
                 .andExpect(jsonPath("$.extraction.lineItems[0].amount").value(8.0))
                 .andExpect(jsonPath("$.extraction.lineItems[0].categoryId").value((int) meatCategoryId))
                 .andExpect(jsonPath("$.extraction.lineItems[1].description").value("Soap"))
+                .andExpect(jsonPath("$.extraction.lineItems[1].quantity").value(nullValue()))
+                .andExpect(jsonPath("$.extraction.lineItems[1].unitPrice").value(nullValue()))
                 .andExpect(jsonPath("$.extraction.lineItems[1].amount").value(4.0))
                 .andExpect(jsonPath("$.extraction.lineItems[1].categoryId").value((int) toiletriesCategoryId));
     }
@@ -183,8 +191,14 @@ class DocumentExtractionLinesIntegrationTest {
                 "EUR",
                 foodCategoryId,
                 List.of(
-                        new LineItemProposal("Minced meat", new BigDecimal("8.00"), meatCategoryId),
-                        new LineItemProposal("Soap", new BigDecimal("4.00"), toiletriesCategoryId)
+                        new LineItemProposal(
+                                "Minced meat",
+                                new BigDecimal("1"),
+                                new BigDecimal("8.00"),
+                                new BigDecimal("8.00"),
+                                meatCategoryId
+                        ),
+                        LineItemProposal.of("Soap", new BigDecimal("4.00"), toiletriesCategoryId)
                 )
         );
     }

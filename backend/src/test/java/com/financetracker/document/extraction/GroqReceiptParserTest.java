@@ -64,6 +64,8 @@ class GroqReceiptParserTest {
                 .andExpect(content().string(Matchers.containsString("\"type\":\"json_object\"")))
                 .andExpect(content().string(Matchers.containsString("merchant")))
                 .andExpect(content().string(Matchers.containsString("categorySlug")))
+                .andExpect(content().string(Matchers.containsString("quantity")))
+                .andExpect(content().string(Matchers.containsString("unitPrice")))
                 .andExpect(content().string(Matchers.containsString("lineItems")))
                 .andExpect(content().string(Matchers.containsString("food")))
                 .andExpect(content().string(Matchers.containsString("Cafe Central")))
@@ -108,7 +110,7 @@ class GroqReceiptParserTest {
                           "choices": [
                             {
                               "message": {
-                                "content": "{\\"merchant\\":\\"Lidl\\",\\"date\\":\\"2024-06-15\\",\\"totalAmount\\":47,\\"currency\\":\\"EUR\\",\\"categorySlug\\":\\"food\\",\\"lineItems\\":[{\\"description\\":\\"Minced meat\\",\\"amount\\":8,\\"categorySlug\\":\\"meat\\"},{\\"description\\":\\"Soap\\",\\"amount\\":4,\\"categorySlug\\":\\"toiletries\\"},{\\"description\\":\\"Bad row\\",\\"amount\\":0,\\"categorySlug\\":\\"food\\"}]}"
+                                "content": "{\\"merchant\\":\\"Lidl\\",\\"date\\":\\"2024-06-15\\",\\"totalAmount\\":47,\\"currency\\":\\"EUR\\",\\"categorySlug\\":\\"food\\",\\"lineItems\\":[{\\"description\\":\\"Minced meat\\",\\"quantity\\":1,\\"unitPrice\\":8,\\"amount\\":8,\\"categorySlug\\":\\"meat\\"},{\\"description\\":\\"Soap\\",\\"quantity\\":null,\\"unitPrice\\":null,\\"amount\\":4,\\"categorySlug\\":\\"toiletries\\"},{\\"description\\":\\"Bad row\\",\\"quantity\\":1,\\"unitPrice\\":0,\\"amount\\":0,\\"categorySlug\\":\\"food\\"}]}"
                               }
                             }
                           ]
@@ -125,11 +127,48 @@ class GroqReceiptParserTest {
 
         assertEquals(2, result.lineItems().size());
         assertEquals("Minced meat", result.lineItems().get(0).description());
+        assertEquals(0, new BigDecimal("1").compareTo(result.lineItems().get(0).quantity()));
+        assertEquals(0, new BigDecimal("8").compareTo(result.lineItems().get(0).unitPrice()));
         assertEquals(0, new BigDecimal("8").compareTo(result.lineItems().get(0).amount()));
         assertEquals(11L, result.lineItems().get(0).categoryId());
         assertEquals("Soap", result.lineItems().get(1).description());
+        assertNull(result.lineItems().get(1).quantity());
+        assertNull(result.lineItems().get(1).unitPrice());
         assertEquals(0, new BigDecimal("4").compareTo(result.lineItems().get(1).amount()));
         assertEquals(21L, result.lineItems().get(1).categoryId());
+        server.verify();
+    }
+
+    @Test
+    void parseMapsQuantityAndUnitPriceFromLidlStyleLine() {
+        server.expect(requestTo("http://groq.local/chat/completions"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().string(Matchers.containsString("Preserve Cyrillic")))
+                .andRespond(withSuccess(
+                        """
+                        {
+                          "choices": [
+                            {
+                              "message": {
+                                "content": "{\\"merchant\\":\\"Lidl\\",\\"date\\":\\"2024-06-15\\",\\"totalAmount\\":5.98,\\"currency\\":\\"EUR\\",\\"categorySlug\\":\\"food\\",\\"lineItems\\":[{\\"description\\":\\"КАФЕ НА ЗЪРНА\\",\\"quantity\\":2,\\"unitPrice\\":2.99,\\"amount\\":5.98,\\"categorySlug\\":\\"food\\"}]}"
+                              }
+                            }
+                          ]
+                        }
+                        """,
+                        MediaType.APPLICATION_JSON
+                ));
+
+        ExtractionResult result = parser.parse(
+                new OcrResult("Lidl\nКАФЕ НА ЗЪРНА\n2,000 × 2,99\n5,98", List.of()),
+                CATEGORIES
+        );
+
+        assertEquals(1, result.lineItems().size());
+        assertEquals("КАФЕ НА ЗЪРНА", result.lineItems().get(0).description());
+        assertEquals(0, new BigDecimal("2").compareTo(result.lineItems().get(0).quantity()));
+        assertEquals(0, new BigDecimal("2.99").compareTo(result.lineItems().get(0).unitPrice()));
+        assertEquals(0, new BigDecimal("5.98").compareTo(result.lineItems().get(0).amount()));
         server.verify();
     }
 

@@ -121,8 +121,8 @@ class ExtractionPipelineTest {
                         "EUR",
                         1L,
                         List.of(
-                                new LineItemProposal("Minced meat", new BigDecimal("8"), 11L),
-                                new LineItemProposal("Bad", BigDecimal.ZERO, 1L)
+                                LineItemProposal.of("Minced meat", new BigDecimal("8"), 11L),
+                                LineItemProposal.of("Bad", BigDecimal.ZERO, 1L)
                         )
                 )
         );

@@ -53,6 +53,8 @@ public class GroqReceiptParser implements ReceiptParser {
               "lineItems": [
                 {
                   "description": string,
+                  "quantity": number or null,
+                  "unitPrice": number or null,
                   "amount": number,
                   "categorySlug": string or null
                 }
@@ -132,7 +134,12 @@ public class GroqReceiptParser implements ReceiptParser {
                 - categorySlug (receipt) should be a broad group when possible; must be one of [%s] or null.
                 - lineItems: one object per purchased product line when visible; use [] if none.
                 - each lineItems[].categorySlug must be one of [%s] or null. Never invent other slugs.
-                - lineItems[].amount is that line's price as a JSON number; description is the product text.
+                - lineItems[].description is the product name only — not qty×price rows like "2,000 × 2,99".
+                - Preserve Cyrillic (and other scripts) exactly; do not transliterate to Latin.
+                - Lidl-style: a qty×price row + product name + line sum = one lineItems object.
+                - lineItems[].quantity and unitPrice come from a qty×price row when present; otherwise null.
+                  If the text clearly shows a count of 1 with one price, you may set quantity=1 and unitPrice=amount.
+                - lineItems[].amount is that line's total price as a JSON number (not tax alone).
                 """.formatted(RECEIPT_HEADER_SCHEMA.strip(), allowedSlugs, allowedSlugs);
     }
 
@@ -212,9 +219,11 @@ public class GroqReceiptParser implements ReceiptParser {
                 continue;
             }
             String description = textOrNull(node.get("description"));
+            BigDecimal quantity = parseAmount(node.get("quantity"));
+            BigDecimal unitPrice = parseAmount(node.get("unitPrice"));
             BigDecimal amount = parseAmount(node.get("amount"));
             Long categoryId = mapCategoryId(textOrNull(node.get("categorySlug")), categories);
-            items.add(new LineItemProposal(description, amount, categoryId));
+            items.add(new LineItemProposal(description, quantity, unitPrice, amount, categoryId));
         }
         return List.copyOf(items);
     }

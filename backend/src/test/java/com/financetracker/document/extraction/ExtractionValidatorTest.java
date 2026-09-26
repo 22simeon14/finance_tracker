@@ -114,11 +114,11 @@ class ExtractionValidatorTest {
                 "EUR",
                 1L,
                 List.of(
-                        new LineItemProposal("Meat", new BigDecimal("8"), 11L),
-                        new LineItemProposal("  ", new BigDecimal("3"), 1L),
-                        new LineItemProposal("Soap", BigDecimal.ZERO, 1L),
-                        new LineItemProposal(null, new BigDecimal("2"), 1L),
-                        new LineItemProposal("Bread", new BigDecimal("-1"), 1L)
+                        LineItemProposal.of("Meat", new BigDecimal("8"), 11L),
+                        LineItemProposal.of("  ", new BigDecimal("3"), 1L),
+                        LineItemProposal.of("Soap", BigDecimal.ZERO, 1L),
+                        LineItemProposal.of(null, new BigDecimal("2"), 1L),
+                        LineItemProposal.of("Bread", new BigDecimal("-1"), 1L)
                 )
         );
 
@@ -138,13 +138,49 @@ class ExtractionValidatorTest {
                 new BigDecimal("5"),
                 "EUR",
                 null,
-                List.of(new LineItemProposal("Mystery", new BigDecimal("5"), null))
+                List.of(LineItemProposal.of("Mystery", new BigDecimal("5"), null))
         );
 
         ExtractionResult result = validator.validate(parsed, CATEGORIES);
 
         assertEquals(1, result.lineItems().size());
         assertNull(result.lineItems().get(0).categoryId());
+    }
+
+    @Test
+    void nullsNonPositiveQuantityAndUnitPriceButKeepsLine() {
+        ExtractionResult parsed = new ExtractionResult(
+                "raw",
+                "Shop",
+                null,
+                new BigDecimal("6"),
+                "EUR",
+                null,
+                List.of(
+                        new LineItemProposal(
+                                "Waffle",
+                                BigDecimal.ZERO,
+                                new BigDecimal("-1"),
+                                new BigDecimal("6"),
+                                null
+                        ),
+                        new LineItemProposal(
+                                "Coffee",
+                                new BigDecimal("2"),
+                                new BigDecimal("3"),
+                                new BigDecimal("6"),
+                                1L
+                        )
+                )
+        );
+
+        ExtractionResult result = validator.validate(parsed, CATEGORIES);
+
+        assertEquals(2, result.lineItems().size());
+        assertNull(result.lineItems().get(0).quantity());
+        assertNull(result.lineItems().get(0).unitPrice());
+        assertEquals(0, new BigDecimal("2").compareTo(result.lineItems().get(1).quantity()));
+        assertEquals(0, new BigDecimal("3").compareTo(result.lineItems().get(1).unitPrice()));
     }
 
     @Test
@@ -156,7 +192,7 @@ class ExtractionValidatorTest {
                 new BigDecimal("10"),
                 "EUR",
                 1L,
-                List.of(new LineItemProposal("", new BigDecimal("10"), 1L))
+                List.of(LineItemProposal.of("", new BigDecimal("10"), 1L))
         );
 
         ExtractionResult result = validator.validate(parsed, CATEGORIES);

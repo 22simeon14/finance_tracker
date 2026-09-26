@@ -14,7 +14,8 @@ import java.util.Set;
  *
  * Forces EUR, drops non-positive amounts and absurd dates, and nulls category ids
  * that are not in the active list. Drops line items without a description or with
- * amount ≤ 0. Does not invent totals with regex. Empty line list after cleanup is fine.
+ * amount ≤ 0. Keeps quantity/unitPrice only when > 0; otherwise null. Does not
+ * invent totals with regex. Empty line list after cleanup is fine.
  */
 @Component
 public class ExtractionValidator {
@@ -61,6 +62,7 @@ public class ExtractionValidator {
 
     /**
      * Keep rows with a non-blank description and a positive amount.
+     * quantity/unitPrice stay only when > 0; otherwise null.
      * Unknown categoryId becomes null; the row itself is kept.
      */
     private static List<LineItemProposal> normalizeLineItems(
@@ -80,8 +82,10 @@ public class ExtractionValidator {
             if (description == null || amount == null) {
                 continue;
             }
+            BigDecimal quantity = normalizeAmount(item.quantity());
+            BigDecimal unitPrice = normalizeAmount(item.unitPrice());
             Long categoryId = normalizeCategoryId(item.categoryId(), activeCategoryIds);
-            cleaned.add(new LineItemProposal(description, amount, categoryId));
+            cleaned.add(new LineItemProposal(description, quantity, unitPrice, amount, categoryId));
         }
         return List.copyOf(cleaned);
     }

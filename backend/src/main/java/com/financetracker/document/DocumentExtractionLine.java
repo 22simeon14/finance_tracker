@@ -29,6 +29,15 @@ public class DocumentExtractionLine {
     @Column(nullable = false, length = 255)
     private String description;
 
+    // Optional; null when OCR/LLM did not provide a quantity.
+    @Column(precision = 12, scale = 3)
+    private BigDecimal quantity;
+
+    // Optional unit price; null when unknown. Soft OCR mismatches vs amount are OK.
+    @Column(name = "unit_price", precision = 12, scale = 2)
+    private BigDecimal unitPrice;
+
+    // Line total (always required and positive).
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
 
@@ -62,6 +71,22 @@ public class DocumentExtractionLine {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public BigDecimal getQuantity() {
+        return quantity;
+    }
+
+    public void setQuantity(BigDecimal quantity) {
+        this.quantity = quantity;
+    }
+
+    public BigDecimal getUnitPrice() {
+        return unitPrice;
+    }
+
+    public void setUnitPrice(BigDecimal unitPrice) {
+        this.unitPrice = unitPrice;
     }
 
     public BigDecimal getAmount() {

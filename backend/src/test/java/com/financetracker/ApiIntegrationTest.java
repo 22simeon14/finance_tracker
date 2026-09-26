@@ -79,6 +79,10 @@ class ApiIntegrationTest {
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("db/migrations/005_document_extraction_lines.sql"),
                     "/docker-entrypoint-initdb.d/005_document_extraction_lines.sql"
+            )
+            .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("db/migrations/006_extraction_line_qty_unit_price.sql"),
+                    "/docker-entrypoint-initdb.d/006_extraction_line_qty_unit_price.sql"
             );
 
     /**
