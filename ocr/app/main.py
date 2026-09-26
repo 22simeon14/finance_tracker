@@ -2,6 +2,7 @@
 Main Responsibility: FastAPI HTTP surface for RapidOCR (health + recognize).
 
 Internal Compose service only. Returns raw text plus optional axis-aligned boxes.
+Uses Cyrillic PP-OCRv5 recognition so Bulgarian receipt text stays readable.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Any
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
-from rapidocr import RapidOCR
+from rapidocr import EngineType, LangRec, ModelType, OCRVersion, RapidOCR
 
 from app.preprocess import prepare_for_ocr
 
@@ -36,10 +37,27 @@ class OcrResponse(BaseModel):
     lines: list[OcrLineOut] = Field(default_factory=list)
 
 
+def create_ocr_engine() -> RapidOCR:
+    """
+    Build RapidOCR with Cyrillic recognition (BG is in the cyrillic package).
+
+    Default Rec is Chinese/Latin and turns Ъ→b, З→3 on Lidl-style receipts.
+    Det/Cls stay at library defaults; only Rec needs the language swap.
+    """
+    return RapidOCR(
+        params={
+            "Rec.engine_type": EngineType.ONNXRUNTIME,
+            "Rec.lang_type": LangRec.CYRILLIC,
+            "Rec.model_type": ModelType.MOBILE,
+            "Rec.ocr_version": OCRVersion.PPOCRV5,
+        }
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Load ONNX models once at startup so /health means the engine is ready.
-    app.state.engine = RapidOCR()
+    app.state.engine = create_ocr_engine()
     yield
     app.state.engine = None
 

@@ -4,8 +4,8 @@ PostgreSQL is the MVP database. Schema and seeds live under `migrations/`.
 
 ## Apply locally
 
-Migrations are ordered: `001` schema → `002` category seed → `003` EUR-only currency checks → `004` category tree → `005` extraction line items.
-**`001` alone still allows EUR/USD/GBP**; apply **`003`** for the MVP EUR-only rule. **`004`** adds `categories.parent_id` and the extra groups and leaves. **`005`** adds `document_extraction_lines`.
+Migrations are ordered: `001` schema → `002` category seed → `003` EUR-only currency checks → `004` category tree → `005` extraction line items → `006` line quantity/unit price.
+**`001` alone still allows EUR/USD/GBP**; apply **`003`** for the MVP EUR-only rule. **`004`** adds `categories.parent_id` and the extra groups and leaves. **`005`** adds `document_extraction_lines`. **`006`** adds nullable `quantity` and `unit_price` on those lines.
 
 ```bash
 psql "$DATABASE_URL" -f db/migrations/001_create_mvp_schema.sql
@@ -13,6 +13,7 @@ psql "$DATABASE_URL" -f db/migrations/002_seed_categories.sql
 psql "$DATABASE_URL" -f db/migrations/003_currency_eur_only.sql
 psql "$DATABASE_URL" -f db/migrations/004_category_parent.sql
 psql "$DATABASE_URL" -f db/migrations/005_document_extraction_lines.sql
+psql "$DATABASE_URL" -f db/migrations/006_extraction_line_qty_unit_price.sql
 ```
 
 Or from this directory:
@@ -23,23 +24,24 @@ psql "$DATABASE_URL" -f migrations/002_seed_categories.sql
 psql "$DATABASE_URL" -f migrations/003_currency_eur_only.sql
 psql "$DATABASE_URL" -f migrations/004_category_parent.sql
 psql "$DATABASE_URL" -f migrations/005_document_extraction_lines.sql
+psql "$DATABASE_URL" -f migrations/006_extraction_line_qty_unit_price.sql
 ```
 
 ### Existing Compose volumes
 
-Docker Compose only runs scripts under the Postgres init mount on **first** volume create. If your local database already exists from an earlier schema, later files such as `003_currency_eur_only.sql`, `004_category_parent.sql`, and `005_document_extraction_lines.sql` will **not** run automatically.
+Docker Compose only runs scripts under the Postgres init mount on **first** volume create. If your local database already exists from an earlier schema, later files such as `003_currency_eur_only.sql`, `004_category_parent.sql`, `005_document_extraction_lines.sql`, and `006_extraction_line_qty_unit_price.sql` will **not** run automatically.
 
 Apply each missing file once against the running database:
 
 ```bash
 # Example when using the Compose postgres service
-docker compose exec -T postgres psql -U postgres -d finance_tracker -f - < db/migrations/005_document_extraction_lines.sql
+docker compose exec -T postgres psql -U postgres -d finance_tracker -f - < db/migrations/006_extraction_line_qty_unit_price.sql
 ```
 
 Or with a direct `DATABASE_URL`:
 
 ```bash
-psql "$DATABASE_URL" -f db/migrations/005_document_extraction_lines.sql
+psql "$DATABASE_URL" -f db/migrations/006_extraction_line_qty_unit_price.sql
 ```
 
 Do **not** run `docker compose down -v` unless you intend to wipe local data and re-init from scratch.
@@ -61,7 +63,7 @@ On Windows PowerShell:
 This script:
 
 1. starts a temporary `postgres:16` container with an empty database;
-2. applies `001` through `005` (`005_document_extraction_lines.sql` stores proposed receipt lines);
+2. applies `001` through `006` (`006` adds quantity/unit_price on extraction lines);
 3. runs `verify_happy_path.sql` (tables, indexes, seeded categories and parents, EUR-only currency checks);
 4. prints `\dt` and removes the container unless `KEEP_CONTAINER=1`.
 

@@ -1,4 +1,4 @@
--- Main Responsibility: Happy-path verification after 001–005 migrations.
+-- Main Responsibility: Happy-path verification after 001–006 migrations.
 -- Fails with RAISE EXCEPTION when an expectation is not met.
 -- Run with: psql ... -v ON_ERROR_STOP=1 -f db/verify_happy_path.sql
 
@@ -17,6 +17,7 @@ DECLARE
     nested_leaf_count INTEGER;
     expenses_currency_ok BOOLEAN;
     extractions_currency_ok BOOLEAN;
+    line_qty_cols INTEGER;
 BEGIN
     SELECT COUNT(*)
     INTO table_count
@@ -52,6 +53,18 @@ BEGIN
     -- Includes categories_parent_id_idx (004) and extraction lines index (005).
     IF index_count <> 7 THEN
         RAISE EXCEPTION 'Expected 7 MVP indexes, found %', index_count;
+    END IF;
+
+    -- 006: optional quantity and unit_price on extraction lines.
+    SELECT COUNT(*)
+    INTO line_qty_cols
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'document_extraction_lines'
+      AND column_name IN ('quantity', 'unit_price');
+
+    IF line_qty_cols <> 2 THEN
+        RAISE EXCEPTION 'Expected quantity and unit_price on document_extraction_lines, found % columns', line_qty_cols;
     END IF;
 
     SELECT COUNT(*)

@@ -1,5 +1,6 @@
 # Main Responsibility: CPU RapidOCR sidecar image (FastAPI + ONNX Runtime).
 # Models warm during build so container health means OCR is ready to serve.
+# Warm uses the same Cyrillic Rec params as app.main.create_ocr_engine.
 
 FROM python:3.12-slim
 
@@ -11,10 +12,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && python -c "from rapidocr import RapidOCR; RapidOCR()"
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+
+# Download Cyrillic PP-OCRv5 Rec (+ default Det/Cls) into the image layer.
+RUN python -c "from app.main import create_ocr_engine; create_ocr_engine()"
 
 EXPOSE 8080
 

@@ -1,5 +1,5 @@
 # Main Responsibility: Verify MVP migrations on a clean temporary PostgreSQL container.
-# Happy path only: apply 001–005, then run db/verify_happy_path.sql
+# Happy path only: apply 001–006, then run db/verify_happy_path.sql
 
 $ErrorActionPreference = "Stop"
 
@@ -16,6 +16,7 @@ $Migration002 = Join-Path $RepoRoot "db/migrations/002_seed_categories.sql"
 $Migration003 = Join-Path $RepoRoot "db/migrations/003_currency_eur_only.sql"
 $Migration004 = Join-Path $RepoRoot "db/migrations/004_category_parent.sql"
 $Migration005 = Join-Path $RepoRoot "db/migrations/005_document_extraction_lines.sql"
+$Migration006 = Join-Path $RepoRoot "db/migrations/006_extraction_line_qty_unit_price.sql"
 $VerifySql = Join-Path $RepoRoot "db/verify_happy_path.sql"
 
 function Invoke-Docker {
@@ -109,6 +110,9 @@ try {
 
     Write-Host "Applying 005_document_extraction_lines.sql..."
     Invoke-PsqlFile -FilePath $Migration005
+
+    Write-Host "Applying 006_extraction_line_qty_unit_price.sql..."
+    Invoke-PsqlFile -FilePath $Migration006
 
     Write-Host "Running happy-path verification..."
     Invoke-PsqlFile -FilePath $VerifySql
