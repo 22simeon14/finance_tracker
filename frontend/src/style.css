@@ -139,10 +139,19 @@
     @apply m-0 text-sm text-app-muted;
   }
 
-  /* Wide: description | amount | category | remove. Narrow: stack fields.
-     min-w-0 keeps long selects from pushing the row past the card. */
+  /* Wide: № | description | qty | unit | amount | category | remove.
+     Narrow: stack fields. min-w-0 keeps long selects inside the card. */
   .review-item-row {
-    @apply mb-3 grid min-w-0 grid-cols-1 items-end gap-3 border-b border-app-divider pb-3 last:mb-0 last:border-b-0 last:pb-0 min-[721px]:grid-cols-[minmax(0,1fr)_7rem_minmax(0,12rem)_auto];
+    @apply mb-3 grid min-w-0 grid-cols-1 items-end gap-3 border-b border-app-divider pb-3 last:mb-0 last:border-b-0 last:pb-0 min-[721px]:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_6.5rem_7rem_minmax(0,11rem)_auto];
+  }
+
+  /* 1-based index from list order; not an editable field. */
+  .review-item-position {
+    @apply flex min-w-0 flex-col gap-1.5 font-semibold;
+  }
+
+  .review-item-position-value {
+    @apply flex min-h-[2.5rem] items-center text-sm font-semibold text-app-muted;
   }
 
   .review-item-field {
@@ -160,6 +169,11 @@
 
   .review-item-remove {
     @apply mt-0 shrink-0 border-app-danger text-app-danger hover:bg-red-50 min-[721px]:mb-0.5;
+  }
+
+  /* Spans the full row under the fields when qty × unit ≠ amount. */
+  .review-item-math-mismatch {
+    @apply m-0 rounded-md border border-app-warn-border bg-app-warn px-3 py-2 text-sm font-normal text-app-warn-ink min-[721px]:col-span-7;
   }
 
   .review-items-footer {

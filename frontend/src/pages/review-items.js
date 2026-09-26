@@ -1,9 +1,10 @@
 /**
  * Main Responsibility: Client-side Items card for the review page.
  *
- * Owns line-item list state, optgroup category selects, add/remove rows, and
- * the lines-vs-receipt total mismatch note. Edits stay in memory until Approve
- * sends them (wired in a later step). Used only by review.js.
+ * Owns line-item list state (description, qty, unit price, amount, category),
+ * optgroup category selects, add/remove rows, lines-vs-receipt total note, and
+ * per-row qty×unit≠amount warnings. Edits stay in memory until Approve sends
+ * them (wired in a later step). Used only by review.js.
  */
 
 /** Local counter so each in-memory line has a stable DOM key before save. */
@@ -25,7 +26,7 @@ export function createReviewItemsEditor({
   let lineItems = [];
 
   addBtn.addEventListener('click', () => {
-    lineItems.push({ key: nextLineKey++, description: '', amount: '', categoryId: null });
+    lineItems.push(emptyLine());
     render();
   });
 
@@ -44,8 +45,15 @@ export function createReviewItemsEditor({
     const field = event.target.name;
     if (field === 'description') {
       item.description = event.target.value;
+    } else if (field === 'quantity') {
+      item.quantity = event.target.value;
+      updateRowMathWarning(row, item);
+    } else if (field === 'unitPrice') {
+      item.unitPrice = event.target.value;
+      updateRowMathWarning(row, item);
     } else if (field === 'amount') {
       item.amount = event.target.value;
+      updateRowMathWarning(row, item);
       updateTotals();
     } else if (field === 'categoryId') {
       item.categoryId = event.target.value ? Number(event.target.value) : null;
@@ -71,6 +79,8 @@ export function createReviewItemsEditor({
     lineItems = (proposals ?? []).map((line) => ({
       key: nextLineKey++,
       description: line.description ?? '',
+      quantity: optionalNumberToInput(line.quantity),
+      unitPrice: optionalNumberToInput(line.unitPrice),
       amount: line.amount != null ? String(line.amount) : '',
       categoryId: line.categoryId ?? null,
     }));
@@ -87,12 +97,29 @@ export function createReviewItemsEditor({
 
     const categoryOptionsHtml = buildLineCategoryOptionsHtml(categories);
     listEl.innerHTML = lineItems
-      .map((item) => `
+      .map((item, index) => {
+        const position = index + 1;
+        const mathMismatch = lineMathMismatch(item);
+        return `
         <div class="review-item-row" data-line-key="${item.key}">
+          <div class="review-item-position">
+            <span class="review-item-label">№</span>
+            <span class="review-item-position-value" aria-label="Line ${position}">${position}</span>
+          </div>
           <label class="review-item-field">
             <span class="review-item-label">Description</span>
             <input type="text" name="description" autocomplete="off"
               value="${escapeHtml(item.description)}" />
+          </label>
+          <label class="review-item-field">
+            <span class="review-item-label">Qty</span>
+            <input type="number" name="quantity" step="any" min="0"
+              value="${escapeHtml(item.quantity)}" />
+          </label>
+          <label class="review-item-field">
+            <span class="review-item-label">Unit price</span>
+            <input type="number" name="unitPrice" step="0.01" min="0"
+              value="${escapeHtml(item.unitPrice)}" />
           </label>
           <label class="review-item-field">
             <span class="review-item-label">Amount</span>
@@ -108,8 +135,12 @@ export function createReviewItemsEditor({
           </label>
           <button type="button" class="review-item-remove" data-remove-line="${item.key}"
             aria-label="Remove item">Remove</button>
+          <p class="review-item-math-mismatch"${mathMismatch ? '' : ' hidden'}>
+            Qty × unit price does not match amount.
+          </p>
         </div>
-      `)
+      `;
+      })
       .join('');
 
     // Restore selected category after rebuild (options HTML has no selected attrs).
@@ -153,6 +184,49 @@ export function createReviewItemsEditor({
   }
 
   return { setCategories, loadFromExtraction };
+}
+
+/** Blank in-memory row for "Add item". */
+function emptyLine() {
+  return {
+    key: nextLineKey++,
+    description: '',
+    quantity: '',
+    unitPrice: '',
+    amount: '',
+    categoryId: null,
+  };
+}
+
+/** Server null → empty input; otherwise string for the number field. */
+function optionalNumberToInput(value) {
+  return value != null ? String(value) : '';
+}
+
+/**
+ * Yellow note only when qty and unit price are both filled and their product
+ * does not match the line amount (e.g. waffle 1×1=1 → no note).
+ */
+function lineMathMismatch(item) {
+  if (item.quantity === '' || item.unitPrice === '' || item.amount === '') {
+    return false;
+  }
+  const quantity = Number(item.quantity);
+  const unitPrice = Number(item.unitPrice);
+  const amount = Number(item.amount);
+  if (!Number.isFinite(quantity) || !Number.isFinite(unitPrice) || !Number.isFinite(amount)) {
+    return false;
+  }
+  return !amountsEqual(quantity * unitPrice, amount);
+}
+
+/** Toggle the row math note without a full re-render (keeps focus). */
+function updateRowMathWarning(row, item) {
+  const note = row.querySelector('.review-item-math-mismatch');
+  if (!note) {
+    return;
+  }
+  note.hidden = !lineMathMismatch(item);
 }
 
 /**
