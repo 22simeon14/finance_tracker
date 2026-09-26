@@ -145,8 +145,8 @@ class DocumentExtractionLinesIntegrationTest {
                 .andExpect(jsonPath("$.extraction.lineItems[0].amount").value(8.0))
                 .andExpect(jsonPath("$.extraction.lineItems[0].categoryId").value((int) meatCategoryId))
                 .andExpect(jsonPath("$.extraction.lineItems[1].description").value("Soap"))
-                .andExpect(jsonPath("$.extraction.lineItems[1].quantity").value(nullValue()))
-                .andExpect(jsonPath("$.extraction.lineItems[1].unitPrice").value(nullValue()))
+                .andExpect(jsonPath("$.extraction.lineItems[1].quantity").value(1.0))
+                .andExpect(jsonPath("$.extraction.lineItems[1].unitPrice").value(4.0))
                 .andExpect(jsonPath("$.extraction.lineItems[1].amount").value(4.0))
                 .andExpect(jsonPath("$.extraction.lineItems[1].categoryId").value((int) toiletriesCategoryId));
     }
@@ -198,7 +198,13 @@ class DocumentExtractionLinesIntegrationTest {
                                 new BigDecimal("8.00"),
                                 meatCategoryId
                         ),
-                        LineItemProposal.of("Soap", new BigDecimal("4.00"), toiletriesCategoryId)
+                        new LineItemProposal(
+                                "Soap",
+                                BigDecimal.ONE,
+                                new BigDecimal("4.00"),
+                                new BigDecimal("4.00"),
+                                toiletriesCategoryId
+                        )
                 )
         );
     }

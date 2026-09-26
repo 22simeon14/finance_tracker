@@ -47,7 +47,8 @@ public record ExtractionResult(
     /**
      * True when at least one header field is useful for review.
      * Currency alone does not count (validator always forces EUR).
-     * Line items alone do not count — a receipt with no header can still go to review.
+     * Line items alone do not count — DocumentService still marks PROCESSING_FAILED
+     * when no header field is usable (user can retry or continue manually).
      */
     public boolean hasUsableHeader() {
         return isPresent(merchant) || date != null || totalAmount != null || categoryId != null;

@@ -132,8 +132,8 @@ class GroqReceiptParserTest {
         assertEquals(0, new BigDecimal("8").compareTo(result.lineItems().get(0).amount()));
         assertEquals(11L, result.lineItems().get(0).categoryId());
         assertEquals("Soap", result.lineItems().get(1).description());
-        assertNull(result.lineItems().get(1).quantity());
-        assertNull(result.lineItems().get(1).unitPrice());
+        assertEquals(0, BigDecimal.ONE.compareTo(result.lineItems().get(1).quantity()));
+        assertEquals(0, new BigDecimal("4").compareTo(result.lineItems().get(1).unitPrice()));
         assertEquals(0, new BigDecimal("4").compareTo(result.lineItems().get(1).amount()));
         assertEquals(21L, result.lineItems().get(1).categoryId());
         server.verify();

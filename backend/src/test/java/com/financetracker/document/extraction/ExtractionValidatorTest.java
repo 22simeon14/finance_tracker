@@ -148,7 +148,27 @@ class ExtractionValidatorTest {
     }
 
     @Test
-    void nullsNonPositiveQuantityAndUnitPriceButKeepsLine() {
+    void defaultsMissingQuantityAndUnitPriceToOneTimesAmount() {
+        ExtractionResult parsed = new ExtractionResult(
+                "raw",
+                "Shop",
+                null,
+                new BigDecimal("4"),
+                "EUR",
+                null,
+                List.of(LineItemProposal.of("Soap", new BigDecimal("4"), 21L))
+        );
+
+        ExtractionResult result = validator.validate(parsed, CATEGORIES);
+
+        assertEquals(1, result.lineItems().size());
+        assertEquals(0, BigDecimal.ONE.compareTo(result.lineItems().get(0).quantity()));
+        assertEquals(0, new BigDecimal("4").compareTo(result.lineItems().get(0).unitPrice()));
+        assertEquals(0, new BigDecimal("4").compareTo(result.lineItems().get(0).amount()));
+    }
+
+    @Test
+    void nonPositiveQuantityAndUnitPriceBecomeOneTimesAmount() {
         ExtractionResult parsed = new ExtractionResult(
                 "raw",
                 "Shop",
@@ -177,8 +197,8 @@ class ExtractionValidatorTest {
         ExtractionResult result = validator.validate(parsed, CATEGORIES);
 
         assertEquals(2, result.lineItems().size());
-        assertNull(result.lineItems().get(0).quantity());
-        assertNull(result.lineItems().get(0).unitPrice());
+        assertEquals(0, BigDecimal.ONE.compareTo(result.lineItems().get(0).quantity()));
+        assertEquals(0, new BigDecimal("6").compareTo(result.lineItems().get(0).unitPrice()));
         assertEquals(0, new BigDecimal("2").compareTo(result.lineItems().get(1).quantity()));
         assertEquals(0, new BigDecimal("3").compareTo(result.lineItems().get(1).unitPrice()));
     }

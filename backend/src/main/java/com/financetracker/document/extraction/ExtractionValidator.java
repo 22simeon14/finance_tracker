@@ -14,8 +14,9 @@ import java.util.Set;
  *
  * Forces EUR, drops non-positive amounts and absurd dates, and nulls category ids
  * that are not in the active list. Drops line items without a description or with
- * amount ≤ 0. Keeps quantity/unitPrice only when > 0; otherwise null. Does not
- * invent totals with regex. Empty line list after cleanup is fine.
+ * amount ≤ 0. Keeps quantity/unitPrice only when > 0; when both are missing,
+ * defaults to quantity=1 and unitPrice=amount (single-price line). Does not invent
+ * totals with regex. Empty line list after cleanup is fine.
  */
 @Component
 public class ExtractionValidator {
@@ -62,8 +63,9 @@ public class ExtractionValidator {
 
     /**
      * Keep rows with a non-blank description and a positive amount.
-     * quantity/unitPrice stay only when > 0; otherwise null.
-     * Unknown categoryId becomes null; the row itself is kept.
+     * quantity/unitPrice stay only when > 0; when both are missing, treat the
+     * line as one unit at the line total. Unknown categoryId becomes null;
+     * the row itself is kept.
      */
     private static List<LineItemProposal> normalizeLineItems(
             List<LineItemProposal> lineItems,
@@ -84,6 +86,11 @@ public class ExtractionValidator {
             }
             BigDecimal quantity = normalizeAmount(item.quantity());
             BigDecimal unitPrice = normalizeAmount(item.unitPrice());
+            // No qty×price from OCR/LLM: one product at the printed line total.
+            if (quantity == null && unitPrice == null) {
+                quantity = BigDecimal.ONE;
+                unitPrice = amount;
+            }
             Long categoryId = normalizeCategoryId(item.categoryId(), activeCategoryIds);
             cleaned.add(new LineItemProposal(description, quantity, unitPrice, amount, categoryId));
         }

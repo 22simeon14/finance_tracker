@@ -137,8 +137,10 @@ public class GroqReceiptParser implements ReceiptParser {
                 - lineItems[].description is the product name only — not qty×price rows like "2,000 × 2,99".
                 - Preserve Cyrillic (and other scripts) exactly; do not transliterate to Latin.
                 - Lidl-style: a qty×price row + product name + line sum = one lineItems object.
-                - lineItems[].quantity and unitPrice come from a qty×price row when present; otherwise null.
-                  If the text clearly shows a count of 1 with one price, you may set quantity=1 and unitPrice=amount.
+                - lineItems[].quantity and unitPrice: when a qty×price row exists, take them from it.
+                  When there is only one price for the product (no qty×price row), always set
+                  quantity=1 and unitPrice=amount (same number as the line total). Do not leave
+                  both null when amount is known.
                 - lineItems[].amount is that line's total price as a JSON number (not tax alone).
                 """.formatted(RECEIPT_HEADER_SCHEMA.strip(), allowedSlugs, allowedSlugs);
     }
