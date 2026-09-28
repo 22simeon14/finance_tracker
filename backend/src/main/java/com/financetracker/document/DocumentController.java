@@ -90,8 +90,9 @@ public class DocumentController {
     }
 
     /**
-     * Confirm review fields into an expense and set status SAVED (one DB transaction).
-     * Only REVIEW_REQUIRED → else 409; missing/foreign → 404; validation/category → 400.
+     * Confirm review fields and optional line items into an expense and set status
+     * SAVED (one DB transaction). Only REVIEW_REQUIRED → else 409; missing/foreign
+     * → 404; invalid line or inactive category → 400.
      */
     @PostMapping("/{id}/approve")
     public ResponseEntity<ExpenseResponse> approve(

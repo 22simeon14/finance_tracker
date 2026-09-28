@@ -10,15 +10,17 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Main Responsibility: Create, read, update, and unapprove owner-scoped expenses.
  *
- * Approve inserts expenses and sets documents.status = SAVED in one transaction.
- * Edit updates confirmed fields with the same validation as approve.
- * Unapprove hard-deletes the expense and returns the document to REVIEW_REQUIRED
- * (file kept). Extraction proposals stay unchanged (history only).
+ * Approve inserts expenses, optional expense_lines from the request body, and
+ * sets documents.status = SAVED in one transaction. Lines are not copied from
+ * extraction. Edit updates confirmed header fields with the same validation as
+ * approve. Unapprove hard-deletes the expense (lines cascade) and returns the
+ * document to REVIEW_REQUIRED (file kept). Extraction proposals stay unchanged.
  * List/get/update/unapprove join through documents.user_id (foreign → 404).
  */
 @Service
@@ -30,21 +32,26 @@ public class ExpenseService {
     private final DocumentRepository documentRepository;
     private final CategoryRepository categoryRepository;
     private final ExpenseRepository expenseRepository;
+    private final ExpenseLineRepository expenseLineRepository;
 
     public ExpenseService(
             DocumentRepository documentRepository,
             CategoryRepository categoryRepository,
-            ExpenseRepository expenseRepository
+            ExpenseRepository expenseRepository,
+            ExpenseLineRepository expenseLineRepository
     ) {
         this.documentRepository = documentRepository;
         this.categoryRepository = categoryRepository;
         this.expenseRepository = expenseRepository;
+        this.expenseLineRepository = expenseLineRepository;
     }
 
     /**
-     * Confirm review fields into a new expense and mark the document SAVED.
-     * Wrong owner / missing → 404; wrong status → 409; inactive/missing category → 400.
-     * Any failure rolls back so the document stays REVIEW_REQUIRED with no expense row.
+     * Confirm review fields into a new expense plus its lines, then mark SAVED.
+     * lineItems come from the request (empty/null allowed), not from extraction.
+     * Wrong owner / missing → 404; wrong status → 409; bad line or inactive
+     * category → 400. Any failure rolls back so the document stays REVIEW_REQUIRED
+     * with no expense row.
      */
     @Transactional
     public ExpenseResponse approve(Long userId, Long documentId, ApproveDocumentRequest request) {
@@ -59,6 +66,8 @@ public class ExpenseService {
         }
 
         Category category = requireActiveCategory(request.categoryId());
+        List<ExpenseLineRequest> lineItems = lineItemsOrEmpty(request.lineItems());
+        requireLineCategories(lineItems);
 
         Expense expense = new Expense();
         expense.setDocumentId(document.getId());
@@ -69,6 +78,7 @@ public class ExpenseService {
         expense.setCurrency(request.currency());
 
         Expense savedExpense = expenseRepository.save(expense);
+        saveLineItems(savedExpense.getId(), lineItems);
 
         document.setStatus(STATUS_SAVED);
         documentRepository.save(document);
@@ -143,8 +153,9 @@ public class ExpenseService {
     }
 
     /**
-     * Unapprove: delete the expense row and set the linked document back to
-     * REVIEW_REQUIRED. File on disk is kept. Missing/foreign → 404.
+     * Unapprove: delete the expense row (expense_lines cascade in the database)
+     * and set the linked document back to REVIEW_REQUIRED. File on disk is kept.
+     * Extraction proposals are not rewritten. Missing/foreign → 404.
      * One transaction so a failed status update does not leave an orphan delete.
      */
     @Transactional
@@ -165,6 +176,56 @@ public class ExpenseService {
     private Expense requireOwnedExpense(Long userId, Long expenseId) {
         return expenseRepository.findByIdAndUserId(expenseId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Expense not found"));
+    }
+
+    /** Null list means the client omitted line items; that is a valid empty breakdown. */
+    private static List<ExpenseLineRequest> lineItemsOrEmpty(List<ExpenseLineRequest> lineItems) {
+        if (lineItems == null || lineItems.isEmpty()) {
+            return List.of();
+        }
+        return lineItems;
+    }
+
+    /**
+     * Each line category, when present, must be active. A missing categoryId is allowed.
+     * Runs before the expense insert so a bad category returns 400 with nothing written.
+     */
+    private void requireLineCategories(List<ExpenseLineRequest> lineItems) {
+        for (ExpenseLineRequest item : lineItems) {
+            if (item == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Line item is invalid");
+            }
+            if (item.categoryId() == null) {
+                continue;
+            }
+            if (categoryRepository.findByIdAndIsActiveTrue(item.categoryId()).isEmpty()) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Line item category must exist and be active"
+                );
+            }
+        }
+    }
+
+    /** Insert lines in request order. Call after the expense row has an id. */
+    private void saveLineItems(Long expenseId, List<ExpenseLineRequest> lineItems) {
+        if (lineItems.isEmpty()) {
+            return;
+        }
+        List<ExpenseLine> rows = new ArrayList<>(lineItems.size());
+        for (int i = 0; i < lineItems.size(); i++) {
+            ExpenseLineRequest item = lineItems.get(i);
+            ExpenseLine row = new ExpenseLine();
+            row.setExpenseId(expenseId);
+            row.setDescription(item.description().trim());
+            row.setQuantity(item.quantity());
+            row.setUnitPrice(item.unitPrice());
+            row.setAmount(item.amount());
+            row.setCategoryId(item.categoryId());
+            row.setPosition(i);
+            rows.add(row);
+        }
+        expenseLineRepository.saveAll(rows);
     }
 
     /** Category must exist and be active; otherwise 400 (same as approve). */

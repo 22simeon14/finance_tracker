@@ -80,6 +80,9 @@ run_psql_file "${REPO_ROOT}/db/migrations/005_document_extraction_lines.sql"
 echo "Applying 006_extraction_line_qty_unit_price.sql..."
 run_psql_file "${REPO_ROOT}/db/migrations/006_extraction_line_qty_unit_price.sql"
 
+echo "Applying 007_expense_lines.sql..."
+run_psql_file "${REPO_ROOT}/db/migrations/007_expense_lines.sql"
+
 echo "Running happy-path verification..."
 run_psql_file "${REPO_ROOT}/db/verify_happy_path.sql"
 

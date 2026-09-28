@@ -230,9 +230,9 @@ export function renderReviewPage(root, documentId) {
   }
 
   /**
-   * POST confirmed form fields to approve. Client checks required fields first;
-   * backend remains the authority for validation and status rules.
-   * Line items stay local for now; a later step will send them with Approve.
+   * POST confirmed form fields and the Items list to approve.
+   * Client checks required fields first; backend remains the authority.
+   * An empty Items list is allowed. A qty×price mismatch does not block Approve.
    */
   async function runApprove() {
     errorEl.hidden = true;
@@ -256,6 +256,13 @@ export function renderReviewPage(root, documentId) {
       return;
     }
 
+    const lines = itemsEditor.linesForApprove();
+    if (lines.error) {
+      errorEl.textContent = lines.error;
+      errorEl.hidden = false;
+      return;
+    }
+
     actionStatusEl.textContent = 'Approving...';
     approveBtn.disabled = true;
 
@@ -268,6 +275,7 @@ export function renderReviewPage(root, documentId) {
           currency: CURRENCY,
           categoryId: Number(categoryIdRaw),
           merchant: merchant || null,
+          lineItems: lines.lineItems,
         }),
       });
       navigate('/expenses');

@@ -1,4 +1,4 @@
--- Main Responsibility: Happy-path verification after 001–006 migrations.
+-- Main Responsibility: Happy-path verification after 001–007 migrations.
 -- Fails with RAISE EXCEPTION when an expectation is not met.
 -- Run with: psql ... -v ON_ERROR_STOP=1 -f db/verify_happy_path.sql
 
@@ -18,6 +18,7 @@ DECLARE
     expenses_currency_ok BOOLEAN;
     extractions_currency_ok BOOLEAN;
     line_qty_cols INTEGER;
+    expense_line_cols INTEGER;
 BEGIN
     SELECT COUNT(*)
     INTO table_count
@@ -29,11 +30,12 @@ BEGIN
           'documents',
           'document_extractions',
           'document_extraction_lines',
-          'expenses'
+          'expenses',
+          'expense_lines'
       );
 
-    IF table_count <> 6 THEN
-        RAISE EXCEPTION 'Expected 6 MVP tables, found %', table_count;
+    IF table_count <> 7 THEN
+        RAISE EXCEPTION 'Expected 7 MVP tables, found %', table_count;
     END IF;
 
     SELECT COUNT(*)
@@ -47,12 +49,14 @@ BEGIN
           'expenses_category_id_idx',
           'expenses_merchant_idx',
           'categories_parent_id_idx',
-          'document_extraction_lines_extraction_id_idx'
+          'document_extraction_lines_extraction_id_idx',
+          'expense_lines_expense_id_idx'
       );
 
-    -- Includes categories_parent_id_idx (004) and extraction lines index (005).
-    IF index_count <> 7 THEN
-        RAISE EXCEPTION 'Expected 7 MVP indexes, found %', index_count;
+    -- Includes categories_parent_id_idx (004), extraction lines index (005),
+    -- and expense lines index (007).
+    IF index_count <> 8 THEN
+        RAISE EXCEPTION 'Expected 8 MVP indexes, found %', index_count;
     END IF;
 
     -- 006: optional quantity and unit_price on extraction lines.
@@ -65,6 +69,18 @@ BEGIN
 
     IF line_qty_cols <> 2 THEN
         RAISE EXCEPTION 'Expected quantity and unit_price on document_extraction_lines, found % columns', line_qty_cols;
+    END IF;
+
+    -- 007: confirmed lines under an expense, including optional qty and unit price.
+    SELECT COUNT(*)
+    INTO expense_line_cols
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'expense_lines'
+      AND column_name IN ('quantity', 'unit_price', 'amount', 'description', 'category_id', 'position');
+
+    IF expense_line_cols <> 6 THEN
+        RAISE EXCEPTION 'Expected expense_lines columns, found %', expense_line_cols;
     END IF;
 
     SELECT COUNT(*)

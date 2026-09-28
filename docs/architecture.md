@@ -292,13 +292,13 @@ Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeByte
 
 **Pending inbox** (`GET /documents?status=pending`): statuses ≠ `SAVED`, ordered `createdAt DESC`. Slim `DocumentResponse`: `id`, `status`, `originalFilename`, `mimeType`, `createdAt`, `fileUrl`. Inbox does not replace re-upload. Forever wipe remains `DELETE /documents/{id}` (pending only).
 
-**Approve** (`POST /documents/{id}/approve`): body = confirmed form fields (`expenseDate`, `totalAmount`, `currency`, `categoryId`, optional `merchant`). Only from `REVIEW_REQUIRED` (`409` otherwise; second approve included). Missing/foreign document → `404`. Invalid amount/currency/category → `400`. One `@Transactional` insert into `expenses` + `documents.status = SAVED`; failure rolls back and leaves `REVIEW_REQUIRED`. Extraction row is not updated (proposals stay as history). Response: `id`, `documentId`, `categoryId`, `merchant`, `expenseDate`, `totalAmount`, `currency`, `createdAt`. UI Approve is shown only for `REVIEW_REQUIRED`; on success navigates to `#/expenses`.
+**Approve** (`POST /documents/{id}/approve`): body = confirmed form fields (`expenseDate`, `totalAmount`, `currency`, `categoryId`, optional `merchant`) plus `lineItems` from the review form (not a re-read of extraction). Each line: `description`, positive `amount`, optional `quantity` / `unitPrice`, optional `categoryId`. Empty or omitted `lineItems` is allowed. Sum of lines need not equal `totalAmount`. Only from `REVIEW_REQUIRED` (`409` otherwise; second approve included). Missing/foreign document → `404`. Invalid amount/currency/line or inactive category → `400` and no expense row. One `@Transactional` insert into `expenses` + `expense_lines` + `documents.status = SAVED`; failure rolls back and leaves `REVIEW_REQUIRED`. Extraction row is not updated (proposals stay as history). Response: `id`, `documentId`, `categoryId`, `merchant`, `expenseDate`, `totalAmount`, `currency`, `createdAt` (lines are not in this body yet). UI Approve is shown only for `REVIEW_REQUIRED`; on success navigates to `#/expenses`.
 
 **Expense read / filter** (`GET /expenses`, `GET /expenses/{id}`): ownership via join `expenses.document_id → documents` and `documents.user_id = currentUser` (same 404 policy as documents). List query params (all optional, AND-combined): `from` / `to` (`LocalDate`, inclusive on `expense_date`), `categoryId`, `merchant` (case-insensitive `LIKE %…%`). `ExpenseViewResponse` = approve fields **plus** `categoryName`, `documentFileUrl` (`/documents/{documentId}/file`), `originalFilename`. Approve’s `ExpenseResponse` shape is unchanged.
 
 **Expense edit** (`PUT /expenses/{id}`): body `ExpenseWriteRequest` aligned with approve (`expenseDate`, `totalAmount` > 0, `currency` = `EUR`, **active** `categoryId`, optional `merchant`). Missing/foreign → `404`; inactive/invalid → `400`. Response: `ExpenseViewResponse`.
 
-**Expense unapprove** (`DELETE /expenses/{id}`): transactional hard-delete of the `expenses` row + set linked document `REVIEW_REQUIRED`; **file kept**. Missing/foreign → `404`. Not a forever wipe — that is only from the pending inbox via `DELETE /documents/{id}`. UI confirms honestly (not “permanent”), then navigates to `#/expenses` with a short notice + link to `#/documents` (no force-redirect to inbox).
+**Expense unapprove** (`DELETE /expenses/{id}`): transactional hard-delete of the `expenses` row (`expense_lines` cascade) + set linked document `REVIEW_REQUIRED`; **file kept**. Extraction proposals are unchanged, so review shows those again, not the last approved edit. Missing/foreign → `404`. Not a forever wipe — that is only from the pending inbox via `DELETE /documents/{id}`. UI confirms honestly (not “permanent”), then navigates to `#/expenses` with a short notice + link to `#/documents` (no force-redirect to inbox).
 
 **Dashboard** (`GET /dashboard`): aggregates **only from `expenses`** (never extractions or pending docs). Optional `from` / `to` (same inclusive date semantics). Body:
 
@@ -418,7 +418,7 @@ Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extr
 
 **Order:** validate → write file → insert `UPLOADED` → `PROCESSING` → `ExtractionPipeline` → `REVIEW_REQUIRED` or `PROCESSING_FAILED`. If processing fails after file + row exist, prefer a recoverable `PROCESSING_FAILED` document over a disk orphan without a row. If the DB insert fails after a disk write, delete the orphan file.
 
-**Approve** (`POST /documents/{id}/approve`, JWT): `DocumentController` delegates to `ExpenseService.approve`. Body carries confirmed fields (not a re-read of extraction). Only `REVIEW_REQUIRED` is allowed. In one DB transaction the service inserts `expenses` and sets `documents.status = SAVED`. Any failure rolls back — no orphan expense and status stays `REVIEW_REQUIRED`. `document_extractions` is left unchanged. Unique `expenses.document_id` is a safety net against double approve. Frontend shows Approve only when status is `REVIEW_REQUIRED`; success navigates to `#/expenses`.
+**Approve** (`POST /documents/{id}/approve`, JWT): `DocumentController` delegates to `ExpenseService.approve`. Body carries confirmed header fields and `lineItems` from the form (not a re-read of extraction). Only `REVIEW_REQUIRED` is allowed. In one DB transaction the service inserts `expenses`, inserts `expense_lines` (empty list allowed), and sets `documents.status = SAVED`. Any failure rolls back — no orphan expense and status stays `REVIEW_REQUIRED`. `document_extractions` is left unchanged. Unique `expenses.document_id` is a safety net against double approve. Frontend shows Approve only when status is `REVIEW_REQUIRED`; success navigates to `#/expenses`.
 
 **Rules:**
 
@@ -428,10 +428,10 @@ Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extr
 - Partial headers (for example total found, merchant null) still go to review.
 - `POST …/process` — retry from `UPLOADED` or `PROCESSING_FAILED` only (`409` otherwise).
 - `POST …/continue-manual` — from `PROCESSING_FAILED` only; empty extraction row + `REVIEW_REQUIRED`.
-- `POST …/approve` — from `REVIEW_REQUIRED` only; atomic expense insert + `SAVED` (`409` if wrong status; `400` if validation/category fails).
+- `POST …/approve` — from `REVIEW_REQUIRED` only; atomic expense + `expense_lines` insert + `SAVED` (`409` if wrong status; `400` if validation/category/line fails). Empty line list is allowed.
 - `DELETE` — hard-delete pending document (cascade extraction) + disk file; not allowed for `SAVED` (`409`).
 - Frontend `#/review/:id` loads review DTO + categories and previews via authenticated blob URL.
-- Line items are not persisted or shown in the UI in this milestone (`ExtractionResult.lineItems` stays empty).
+- Proposed lines live on `document_extraction_lines` and in the review Items card. Approve writes the form list to `expense_lines` (empty list allowed). `GET /expenses/{id}` does not return lines.
 
 ### 6.4 Status model
 
@@ -569,7 +569,7 @@ sequenceDiagram
 
 ## 8. Data model
 
-PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`001` schema, `002` category seed, `003` EUR-only currency checks, `004` category `parent_id` and extra groups/leaves). On a fresh Compose volume, Postgres runs those files in name order once. **`001` alone still allows EUR/USD/GBP**; **`003` is required for EUR-only**. `002` seeds the original ten groups. `004` adds Household, Eating out, Insurance, Subscriptions, and Sport. Eating out, Insurance, Subscriptions, and Sport have no children. Leaves sit under Food, Household, Transport, and Health. `parent_id` null is a top-level group; a set `parent_id` is a leaf.
+PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`001` schema, `002` category seed, `003` EUR-only currency checks, `004` category `parent_id` and extra groups/leaves, `005`–`006` extraction lines, `007` expense lines). On a fresh Compose volume, Postgres runs those files in name order once. **`001` alone still allows EUR/USD/GBP**; **`003` is required for EUR-only**. `002` seeds the original ten groups. `004` adds Household, Eating out, Insurance, Subscriptions, and Sport. Eating out, Insurance, Subscriptions, and Sport have no children. Leaves sit under Food, Household, Transport, and Health. `parent_id` null is a top-level group; a set `parent_id` is a leaf.
 
 ### Table responsibilities
 
@@ -580,6 +580,7 @@ PostgreSQL; `BIGINT` identity keys. Schema source of truth: `db/migrations/` (`0
 | `document_extractions` | Untrusted proposed fields for review (at most one per document) |
 | `categories` | Reusable labels; `parent_id` null is a group, set is a leaf; inactive kept for history but not for new picks |
 | `expenses` | User-approved financial record; source of truth for list/dashboard |
+| `expense_lines` | Confirmed receipt lines under one expense (`007`); cascade on expense delete |
 
 Expense ownership: `expenses.document_id → documents.user_id` (no `expenses.user_id`). No `users.role`.
 
@@ -591,6 +592,8 @@ erDiagram
     documents ||--o| document_extractions : has
     documents ||--o| expenses : may_produce
     categories ||--o{ expenses : classifies
+    expenses ||--o{ expense_lines : breaks_down
+    categories ||--o{ expense_lines : "optional line"
     categories ||--o{ document_extractions : "optional proposed"
 ```
 
@@ -602,6 +605,7 @@ erDiagram
 | Document → DocumentExtraction | 1 : 0..1 |
 | Document → Expense | 1 : 0..1 |
 | Category → Expense | 1 : N |
+| Expense → ExpenseLine | 1 : N |
 
 ### Database-enforceable invariants (summary)
 
@@ -612,7 +616,7 @@ erDiagram
 ### Application rules (summary)
 
 - Writing extractions must never insert an expense.
-- Expense is created only on explicit approve, in one transaction with `status = SAVED`.
+- Expense is created only on explicit approve, in one transaction with its `expense_lines` and `status = SAVED`. Empty line list is allowed. A bad line rolls the whole approve back.
 - No expense while status is `UPLOADED` / `PROCESSING` / `REVIEW_REQUIRED` / `PROCESSING_FAILED`.
 - Lists and dashboard query `expenses` only.
 - Owner isolation on every document/expense load.
@@ -640,7 +644,7 @@ Already decided:
 - File bytes via `GET /documents/{id}/file`; review DTO includes `fileUrl`.
 - Upload MIME/size and `{UPLOAD_DIR}/{userId}/{uuid}{ext}` layout.
 - Currency **EUR only**; hard delete only; no `users.role` / no `expenses.user_id`.
-- Extraction stack: PDFBox for digital PDFs; RapidOCR sidecar for photos/scans; **Groq** JSON parse on text only (OpenAI-compatible chat API at `api.groq.com`); Java validation after parse. LLM is the semantic parser every time (not a fallback). No vision-LLM on JPEGs; no second OCR engine; no line-item tables/UI in this milestone.
+- Extraction stack: PDFBox for digital PDFs; RapidOCR sidecar for photos/scans; **Groq** JSON parse on text only (OpenAI-compatible chat API at `api.groq.com`); Java validation after parse. LLM is the semantic parser every time (not a fallback). No vision-LLM on JPEGs; no second OCR engine. Confirmed receipt lines are stored in `expense_lines` on approve.
 - `PROCESSING_FAILED` comes from empty text or infrastructure/parse failures (no filename-based mock).
 
 ---
@@ -660,6 +664,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-27 | Step 5: `007_expense_lines`; approve persists form `lineItems` in the same transaction (empty list allowed; invalid line or inactive category → 400, no expense). Unapprove cascades lines. Extraction proposals stay history. |
 | 2026-09-23 | Docs sync: `ApiExceptionHandler` + error/test sections; Flow C / status / processing / extraction diagrams aligned (unapprove vs forever wipe; no recent widgets; approve → expense list); README + `db/README` touch-ups; status → MVP documentation. |
 | 2026-09-22 | Step 16 demo-ready: full README demo script (register → upload → review → approve → filters → dashboard → edit/unapprove); home/nav polish; confirmed unapproved docs stay out of dashboard totals. |
 | 2026-09-21 | Default Groq model → `openai/gpt-oss-120b` (`.env.example`, Compose, `application.yml`); `llama-3.3-70b-versatile` deprecated (Groq 404). Clone setup via `scripts/setup.ps1` / `scripts/setup.sh`; README Quick start prefers scripts; notes `mvn test` + short demo walkthrough. |

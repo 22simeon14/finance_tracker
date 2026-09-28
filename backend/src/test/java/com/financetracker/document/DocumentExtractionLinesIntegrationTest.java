@@ -88,6 +88,10 @@ class DocumentExtractionLinesIntegrationTest {
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("db/migrations/006_extraction_line_qty_unit_price.sql"),
                     "/docker-entrypoint-initdb.d/006_extraction_line_qty_unit_price.sql"
+            )
+            .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("db/migrations/007_expense_lines.sql"),
+                    "/docker-entrypoint-initdb.d/007_expense_lines.sql"
             );
 
     @DynamicPropertySource

@@ -1,5 +1,6 @@
 package com.financetracker.expense;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -7,11 +8,13 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * Main Responsibility: Validated JSON body for POST /documents/{id}/approve.
  *
- * Confirmed review fields become the expense row. Merchant is optional;
+ * Confirmed review fields become the expense row. lineItems is the form list
+ * (not a re-read of extraction); null or empty is allowed. Merchant is optional;
  * blank values are normalized to null in ExpenseService. Currency is EUR only.
  */
 public record ApproveDocumentRequest(
@@ -19,6 +22,7 @@ public record ApproveDocumentRequest(
         @NotNull @DecimalMin(value = "0.0", inclusive = false) BigDecimal totalAmount,
         @NotNull @Pattern(regexp = "EUR") String currency,
         @NotNull Long categoryId,
-        @Size(max = 255) String merchant
+        @Size(max = 255) String merchant,
+        @Valid List<ExpenseLineRequest> lineItems
 ) {
 }

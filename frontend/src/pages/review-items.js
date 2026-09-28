@@ -3,8 +3,8 @@
  *
  * Owns line-item list state (description, qty, unit price, amount, category),
  * optgroup category selects, add/remove rows, lines-vs-receipt total note, and
- * per-row qty×unit≠amount warnings. Edits stay in memory until Approve sends
- * them (wired in a later step). Used only by review.js.
+ * per-row qty×unit≠amount warnings. linesForApprove() builds the JSON list
+ * Approve posts. Used only by review.js.
  */
 
 /** Local counter so each in-memory line has a stable DOM key before save. */
@@ -108,7 +108,7 @@ export function createReviewItemsEditor({
           </div>
           <label class="review-item-field">
             <span class="review-item-label">Description</span>
-            <input type="text" name="description" autocomplete="off"
+            <input type="text" name="description" maxlength="255" autocomplete="off"
               value="${escapeHtml(item.description)}" />
           </label>
           <label class="review-item-field">
@@ -183,7 +183,56 @@ export function createReviewItemsEditor({
     }
   }
 
-  return { setCategories, loadFromExtraction };
+  /**
+   * Payload for POST approve. error is a short message when a row is not
+   * saveable; lineItems is [] when the list is empty (that is allowed).
+   * Qty × unit price mismatch is only a yellow note and is not an error here.
+   */
+  function linesForApprove() {
+    const payload = [];
+    for (let index = 0; index < lineItems.length; index += 1) {
+      const item = lineItems[index];
+      const label = `Item ${index + 1}`;
+      const description = item.description.trim();
+      if (!description) {
+        return { error: `${label} needs a description.`, lineItems: [] };
+      }
+      if (description.length > 255) {
+        return { error: `${label} description is too long.`, lineItems: [] };
+      }
+      const amount = parseOptionalNumber(item.amount);
+      if (amount == null || !(amount > 0)) {
+        return { error: `${label} needs an amount greater than zero.`, lineItems: [] };
+      }
+      const quantity = parseOptionalNumber(item.quantity);
+      if (item.quantity !== '' && (quantity == null || !(quantity > 0))) {
+        return { error: `${label} quantity must be greater than zero.`, lineItems: [] };
+      }
+      const unitPrice = parseOptionalNumber(item.unitPrice);
+      if (item.unitPrice !== '' && (unitPrice == null || !(unitPrice > 0))) {
+        return { error: `${label} unit price must be greater than zero.`, lineItems: [] };
+      }
+      payload.push({
+        description,
+        quantity,
+        unitPrice,
+        amount,
+        categoryId: item.categoryId ?? null,
+      });
+    }
+    return { error: null, lineItems: payload };
+  }
+
+  return { setCategories, loadFromExtraction, linesForApprove };
+}
+
+/** Blank or non-numeric → null. Caller decides whether null is an error. */
+function parseOptionalNumber(raw) {
+  if (raw === '' || raw == null) {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
 }
 
 /** Blank in-memory row for "Add item". */
