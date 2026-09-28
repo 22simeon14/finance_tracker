@@ -18,10 +18,11 @@ import java.util.List;
  *
  * Approve inserts expenses, optional expense_lines from the request body, and
  * sets documents.status = SAVED in one transaction. Lines are not copied from
- * extraction. Edit updates confirmed header fields with the same validation as
- * approve. Unapprove hard-deletes the expense (lines cascade) and returns the
- * document to REVIEW_REQUIRED (file kept). Extraction proposals stay unchanged.
- * List/get/update/unapprove join through documents.user_id (foreign → 404).
+ * extraction. Edit updates confirmed header fields and replaces expense_lines
+ * with the same validation as approve. Unapprove hard-deletes the expense
+ * (lines cascade) and returns the document to REVIEW_REQUIRED (file kept).
+ * Extraction proposals stay unchanged. List/get/update/unapprove join through
+ * documents.user_id (foreign → 404).
  */
 @Service
 public class ExpenseService {
@@ -92,6 +93,7 @@ public class ExpenseService {
      * contains) are AND-combined; blank merchant is treated as no filter.
      * Unused filters pass boolean false + non-null sentinel so PostgreSQL
      * never sees typed-null binds in optional JPQL branches.
+     * lineItems is always empty here — the list UI is one row per purchase.
      */
     @Transactional(readOnly = true)
     public List<ExpenseViewResponse> list(
@@ -120,27 +122,31 @@ public class ExpenseService {
                         hasMerchant ? merchantFilter : ""
                 )
                 .stream()
-                .map(expense -> toViewResponse(userId, expense))
+                .map(expense -> toViewResponse(userId, expense, false))
                 .toList();
     }
 
     /**
-     * Return one owned expense. Missing or foreign id → 404 (same as documents).
+     * Return one owned expense with its confirmed lines.
+     * Missing or foreign id → 404 (same as documents).
      */
     @Transactional(readOnly = true)
     public ExpenseViewResponse getById(Long userId, Long expenseId) {
         Expense expense = requireOwnedExpense(userId, expenseId);
-        return toViewResponse(userId, expense);
+        return toViewResponse(userId, expense, true);
     }
 
     /**
-     * Update confirmed fields on an owned expense (same rules as approve).
-     * Missing/foreign → 404; inactive/missing category → 400.
+     * Update confirmed header fields and replace expense_lines (same rules as
+     * approve). Missing/foreign → 404; inactive/missing category or bad line → 400.
+     * One transaction so a failed line replace does not leave a half-updated row.
      */
     @Transactional
     public ExpenseViewResponse update(Long userId, Long expenseId, ExpenseWriteRequest request) {
         Expense expense = requireOwnedExpense(userId, expenseId);
         Category category = requireActiveCategory(request.categoryId());
+        List<ExpenseLineRequest> lineItems = lineItemsOrEmpty(request.lineItems());
+        requireLineCategories(lineItems);
 
         expense.setCategoryId(category.getId());
         expense.setMerchant(normalizeMerchant(request.merchant()));
@@ -149,7 +155,12 @@ public class ExpenseService {
         expense.setCurrency(request.currency());
 
         Expense saved = expenseRepository.save(expense);
-        return toViewResponse(userId, saved);
+        // Full replace: drop old lines, then insert the form list (may be empty).
+        // Flush so the delete is applied before insert in the same transaction.
+        expenseLineRepository.deleteByExpenseId(saved.getId());
+        expenseLineRepository.flush();
+        saveLineItems(saved.getId(), lineItems);
+        return toViewResponse(userId, saved, true);
     }
 
     /**
@@ -261,8 +272,9 @@ public class ExpenseService {
     /**
      * Build the public read DTO: resolve category name (even if later inactive)
      * and document filename via an owner-scoped document lookup.
+     * includeLines true loads expense_lines; false keeps list responses lean.
      */
-    private ExpenseViewResponse toViewResponse(Long userId, Expense expense) {
+    private ExpenseViewResponse toViewResponse(Long userId, Expense expense, boolean includeLines) {
         // findById (not findByIdAndIsActiveTrue) so inactive categories still show a name.
         String categoryName = categoryRepository.findById(expense.getCategoryId())
                 .map(Category::getName)
@@ -273,6 +285,18 @@ public class ExpenseService {
                 .orElse(null);
 
         String documentFileUrl = "/documents/" + expense.getDocumentId() + "/file";
+
+        List<ExpenseLineResponse> lineItems = includeLines
+                ? expenseLineRepository.findByExpenseIdOrderByPositionAsc(expense.getId()).stream()
+                .map(line -> new ExpenseLineResponse(
+                        line.getDescription(),
+                        line.getQuantity(),
+                        line.getUnitPrice(),
+                        line.getAmount(),
+                        line.getCategoryId()
+                ))
+                .toList()
+                : List.of();
 
         return new ExpenseViewResponse(
                 expense.getId(),
@@ -285,7 +309,8 @@ public class ExpenseService {
                 expense.getCurrency(),
                 expense.getCreatedAt(),
                 documentFileUrl,
-                originalFilename
+                originalFilename,
+                lineItems
         );
     }
 }

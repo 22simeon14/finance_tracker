@@ -3,11 +3,14 @@ package com.financetracker.expense;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Main Responsibility: Public read DTO for expense list items and detail views.
  *
- * Extends approve fields with category name and document file metadata for the UI.
+ * Extends approve fields with category name, document file metadata, and
+ * lineItems. Detail (GET/PUT by id) loads confirmed expense_lines; the list
+ * endpoint returns an empty lineItems array so the UI stays one row per purchase.
  * Approve still returns ExpenseResponse unchanged.
  */
 public record ExpenseViewResponse(
@@ -21,6 +24,7 @@ public record ExpenseViewResponse(
         String currency,
         LocalDateTime createdAt,
         String documentFileUrl,
-        String originalFilename
+        String originalFilename,
+        List<ExpenseLineResponse> lineItems
 ) {
 }

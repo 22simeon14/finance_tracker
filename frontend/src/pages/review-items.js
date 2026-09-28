@@ -1,18 +1,23 @@
 /**
- * Main Responsibility: Client-side Items card for the review page.
+ * Main Responsibility: Client-side Items card for review and expense detail.
  *
  * Owns line-item list state (description, qty, unit price, amount, category),
  * optgroup category selects, add/remove rows, lines-vs-receipt total note, and
  * per-row qty×unit≠amount warnings. linesForApprove() builds the JSON list
- * Approve posts. Used only by review.js.
+ * Approve / Save post. Used by review.js and expense-detail.js.
  */
 
 /** Local counter so each in-memory line has a stable DOM key before save. */
 let nextLineKey = 1;
 
+/** Default yellow note when line sum ≠ receipt total (review Approve wording). */
+const DEFAULT_MISMATCH_HINT =
+  'Line items and receipt total differ. That can be a discount, deposit, or tip — Approve is still allowed.';
+
 /**
  * Wire the Items section DOM. Call setCategories once categories load, then
- * loadFromExtraction whenever the document / extraction is refreshed.
+ * loadFromExtraction whenever the document / expense lines are refreshed.
+ * mismatchHint overrides the yellow note (expense Save uses different wording).
  */
 export function createReviewItemsEditor({
   listEl,
@@ -21,6 +26,7 @@ export function createReviewItemsEditor({
   addBtn,
   amountInputEl,
   currency,
+  mismatchHint = DEFAULT_MISMATCH_HINT,
 }) {
   let categories = [];
   let lineItems = [];
@@ -174,8 +180,7 @@ export function createReviewItemsEditor({
     const receiptOk = Number.isFinite(receiptTotal) && amountInputEl.value !== '';
     const mismatch = hasLines && receiptOk && !amountsEqual(linesSum, receiptTotal);
     if (mismatch) {
-      mismatchEl.textContent =
-        'Line items and receipt total differ. That can be a discount, deposit, or tip — Approve is still allowed.';
+      mismatchEl.textContent = mismatchHint;
       mismatchEl.hidden = false;
     } else {
       mismatchEl.hidden = true;

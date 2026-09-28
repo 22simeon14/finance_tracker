@@ -229,7 +229,7 @@
     @apply mt-0;
   }
 
-  /* Filled primary — used only for Approve on the review page. */
+  /* Filled primary — Approve on review, Save on expense detail. */
   .button-primary {
     @apply border-transparent bg-app-link text-white hover:bg-blue-700;
   }

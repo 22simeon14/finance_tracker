@@ -244,9 +244,10 @@ flowchart TB
 | `pages/home.js` | Account, categories sample, health; logged-in links to Dashboard, Expenses, Pending inbox, Upload |
 | `pages/login.js` / `register.js` | Auth forms |
 | `pages/upload.js` | Multipart upload → navigate to review |
-| `pages/review.js` | Preview + editable proposed fields; Approve (→ expenses list) / retry / continue-manual / delete |
-| `pages/expenses.js` | Filtered expense list (`GET /expenses?…`); true-empty vs filtered-empty; post-unapprove notice + link to `#/documents` |
-| `pages/expense-detail.js` | Detail + edit (`PUT`) + unapprove (`DELETE`); preview via `apiBlob`; after unapprove → `#/expenses` |
+| `pages/review.js` | Preview + editable proposed fields + Items card; Approve (→ expenses list) / retry / continue-manual / delete |
+| `pages/review-items.js` | Shared Items editor (optgroup categories, add/remove, lines-vs-total note); used by review and expense detail |
+| `pages/expenses.js` | Filtered expense list (`GET /expenses?…`); one row per purchase (no line items); true-empty vs filtered-empty; post-unapprove notice + link to `#/documents` |
+| `pages/expense-detail.js` | Detail + edit header/lines (`PUT`) + unapprove (`DELETE`); Items card via `review-items.js`; preview via `apiBlob`; after unapprove → `#/expenses` |
 | `pages/dashboard.js` | Aggregates only (`GET /dashboard`); optional `from`/`to`; no recent-list widgets |
 | `pages/documents.js` | Pending inbox (`GET /documents?status=pending`); open review; forever-delete |
 | `vite.config.js` | Dev server `:5173` + API proxy (`/auth`, `/documents` 120s timeout, `/expenses`, `/dashboard`, …) |
@@ -294,9 +295,9 @@ Review DTO fields: `id`, `status`, `originalFilename`, `mimeType`, `fileSizeByte
 
 **Approve** (`POST /documents/{id}/approve`): body = confirmed form fields (`expenseDate`, `totalAmount`, `currency`, `categoryId`, optional `merchant`) plus `lineItems` from the review form (not a re-read of extraction). Each line: `description`, positive `amount`, optional `quantity` / `unitPrice`, optional `categoryId`. Empty or omitted `lineItems` is allowed. Sum of lines need not equal `totalAmount`. Only from `REVIEW_REQUIRED` (`409` otherwise; second approve included). Missing/foreign document → `404`. Invalid amount/currency/line or inactive category → `400` and no expense row. One `@Transactional` insert into `expenses` + `expense_lines` + `documents.status = SAVED`; failure rolls back and leaves `REVIEW_REQUIRED`. Extraction row is not updated (proposals stay as history). Response: `id`, `documentId`, `categoryId`, `merchant`, `expenseDate`, `totalAmount`, `currency`, `createdAt` (lines are not in this body yet). UI Approve is shown only for `REVIEW_REQUIRED`; on success navigates to `#/expenses`.
 
-**Expense read / filter** (`GET /expenses`, `GET /expenses/{id}`): ownership via join `expenses.document_id → documents` and `documents.user_id = currentUser` (same 404 policy as documents). List query params (all optional, AND-combined): `from` / `to` (`LocalDate`, inclusive on `expense_date`), `categoryId`, `merchant` (case-insensitive `LIKE %…%`). `ExpenseViewResponse` = approve fields **plus** `categoryName`, `documentFileUrl` (`/documents/{documentId}/file`), `originalFilename`. Approve’s `ExpenseResponse` shape is unchanged.
+**Expense read / filter** (`GET /expenses`, `GET /expenses/{id}`): ownership via join `expenses.document_id → documents` and `documents.user_id = currentUser` (same 404 policy as documents). List query params (all optional, AND-combined): `from` / `to` (`LocalDate`, inclusive on `expense_date`), `categoryId`, `merchant` (case-insensitive `LIKE %…%`). `ExpenseViewResponse` = approve fields **plus** `categoryName`, `documentFileUrl` (`/documents/{documentId}/file`), `originalFilename`, and `lineItems`. Detail GET loads confirmed `expense_lines`; list returns `lineItems: []` so the UI stays one row per purchase. Approve’s `ExpenseResponse` shape is unchanged.
 
-**Expense edit** (`PUT /expenses/{id}`): body `ExpenseWriteRequest` aligned with approve (`expenseDate`, `totalAmount` > 0, `currency` = `EUR`, **active** `categoryId`, optional `merchant`). Missing/foreign → `404`; inactive/invalid → `400`. Response: `ExpenseViewResponse`.
+**Expense edit** (`PUT /expenses/{id}`): body `ExpenseWriteRequest` aligned with approve (`expenseDate`, `totalAmount` > 0, `currency` = `EUR`, **active** `categoryId`, optional `merchant`, optional `lineItems`). Save **replaces** the whole `expense_lines` list (null/empty clears). Invalid line or inactive line category → `400` and no partial write. Response: `ExpenseViewResponse` including the new lines.
 
 **Expense unapprove** (`DELETE /expenses/{id}`): transactional hard-delete of the `expenses` row (`expense_lines` cascade) + set linked document `REVIEW_REQUIRED`; **file kept**. Extraction proposals are unchanged, so review shows those again, not the last approved edit. Missing/foreign → `404`. Not a forever wipe — that is only from the pending inbox via `DELETE /documents/{id}`. UI confirms honestly (not “permanent”), then navigates to `#/expenses` with a short notice + link to `#/documents` (no force-redirect to inbox).
 
@@ -431,7 +432,7 @@ Detail diagrams for the PROCESSING step: [extraction-pipeline.mmd](diagrams/extr
 - `POST …/approve` — from `REVIEW_REQUIRED` only; atomic expense + `expense_lines` insert + `SAVED` (`409` if wrong status; `400` if validation/category/line fails). Empty line list is allowed.
 - `DELETE` — hard-delete pending document (cascade extraction) + disk file; not allowed for `SAVED` (`409`).
 - Frontend `#/review/:id` loads review DTO + categories and previews via authenticated blob URL.
-- Proposed lines live on `document_extraction_lines` and in the review Items card. Approve writes the form list to `expense_lines` (empty list allowed). `GET /expenses/{id}` does not return lines.
+- Proposed lines live on `document_extraction_lines` and in the review Items card. Approve writes the form list to `expense_lines` (empty list allowed). `GET /expenses/{id}` and `PUT /expenses/{id}` return/replace those confirmed lines; the expenses list stays one row per purchase.
 
 ### 6.4 Status model
 
@@ -506,15 +507,15 @@ After approve, the user can **list** (with filters), **view**, **edit**, and **u
 | Capability | Behaviour |
 | ---------- | --------- |
 | List + filters | `GET /expenses` with optional `from`, `to`, `categoryId`, `merchant` (AND). Order `expense_date DESC`, then `id DESC` |
-| Details | `GET /expenses/{id}` → `ExpenseViewResponse`; missing/foreign → `404` |
-| Edit | `PUT /expenses/{id}` with approve-aligned body; active category required; response `ExpenseViewResponse` |
+| Details | `GET /expenses/{id}` → `ExpenseViewResponse` with `lineItems`; missing/foreign → `404` |
+| Edit | `PUT /expenses/{id}` with approve-aligned body including `lineItems` (full replace); active category required; response `ExpenseViewResponse` |
 | Unapprove | `DELETE /expenses/{id}` → `204`; delete expense + document `REVIEW_REQUIRED`; **file kept**. After UI: `#/expenses` + short notice + link to `#/documents` (not force-redirect to inbox) |
 | Forever wipe | Only from pending inbox: existing `DELETE /documents/{id}` (pending/non-`SAVED`); removes row + file |
 | Dashboard | `GET /dashboard` optional `from`/`to`; `totalsByCurrency`, `byCategory`, `byMerchant` from **`expenses` only**; no recent-list widgets |
 | Pending inbox | `GET /documents?status=pending` (≠ `SAVED`, `createdAt DESC`); open `#/review/:id`; does **not** replace re-upload |
 | Empty states | No expenses → upload CTA; filters match nothing → “No expenses match” + clear; inbox empty → “No pending documents” |
 | Auth | No token → `401`; foreign ids → `404` (`anyRequest().authenticated()`; no `SecurityConfig` change) |
-| UI | `#/expenses` filters; `#/expenses/:id` edit/unapprove; `#/dashboard`; `#/documents`; home links when logged in |
+| UI | `#/expenses` filters (one row per purchase); `#/expenses/:id` edit header + lines / unapprove; `#/dashboard`; `#/documents`; home links when logged in |
 
 `ExpenseController` + `ExpenseService` own filtered list, detail, update, and unapprove. `DashboardController` + `DashboardService` read aggregates via `ExpenseRepository`. `DocumentService.listPending` backs the inbox.
 
@@ -664,6 +665,7 @@ Already decided:
 
 | Date | Change |
 | ---- | ------ |
+| 2026-09-28 | Step 6: `GET`/`PUT /expenses/{id}` carry `lineItems` (PUT full-replaces `expense_lines`); list keeps empty `lineItems`; expense detail Items card reuses review editor. |
 | 2026-09-27 | Step 5: `007_expense_lines`; approve persists form `lineItems` in the same transaction (empty list allowed; invalid line or inactive category → 400, no expense). Unapprove cascades lines. Extraction proposals stay history. |
 | 2026-09-23 | Docs sync: `ApiExceptionHandler` + error/test sections; Flow C / status / processing / extraction diagrams aligned (unapprove vs forever wipe; no recent widgets; approve → expense list); README + `db/README` touch-ups; status → MVP documentation. |
 | 2026-09-22 | Step 16 demo-ready: full README demo script (register → upload → review → approve → filters → dashboard → edit/unapprove); home/nav polish; confirmed unapproved docs stay out of dashboard totals. |

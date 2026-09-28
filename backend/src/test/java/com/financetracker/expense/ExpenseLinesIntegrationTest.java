@@ -32,6 +32,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -40,13 +41,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * Main Responsibility: Prove approve writes expense_lines from the request body,
- * rejects a bad line without creating an expense, and unapprove drops those lines
- * while extraction proposals stay as they were.
+ * rejects a bad line without creating an expense, unapprove drops those lines
+ * while extraction proposals stay as they were, and GET/PUT expense detail
+ * returns and replaces confirmed lines.
  *
  * OCR/Groq stay off. continue-manual reaches REVIEW_REQUIRED without network.
  */
@@ -293,6 +296,122 @@ class ExpenseLinesIntegrationTest {
                 .andExpect(jsonPath("$.status").value("REVIEW_REQUIRED"));
     }
 
+    @Test
+    void getAndPut_expense_returnsAndReplacesLines_listOmitsLineBodies() throws Exception {
+        String token = registerAndLogin(uniqueEmail, "password123");
+        long documentId = uploadAndContinueManual(token);
+
+        MvcResult approveResult = mockMvc.perform(post("/documents/" + documentId + "/approve")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(approveJson(
+                                "Lidl",
+                                "2026-03-05",
+                                "47.00",
+                                foodCategoryId,
+                                """
+                                        [
+                                          {"description":"Minced meat","quantity":1,"unitPrice":8.00,"amount":8.00,"categoryId":%d},
+                                          {"description":"Soap","amount":4.00}
+                                        ]
+                                        """.formatted(meatCategoryId)
+                        )))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        long expenseId = objectMapper.readTree(approveResult.getResponse().getContentAsString()).get("id").asLong();
+
+        mockMvc.perform(get("/expenses/" + expenseId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lineItems.length()").value(2))
+                .andExpect(jsonPath("$.lineItems[0].description").value("Minced meat"))
+                .andExpect(jsonPath("$.lineItems[0].categoryId").value(meatCategoryId))
+                .andExpect(jsonPath("$.lineItems[1].description").value("Soap"))
+                .andExpect(jsonPath("$.lineItems[1].categoryId").value(nullValue()));
+
+        // List stays one purchase row: lineItems is an empty array, not the breakdown.
+        mockMvc.perform(get("/expenses")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(expenseId))
+                .andExpect(jsonPath("$[0].lineItems.length()").value(0));
+
+        mockMvc.perform(put("/expenses/" + expenseId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(writeJson(
+                                "Lidl",
+                                "2026-03-05",
+                                "47.00",
+                                foodCategoryId,
+                                """
+                                        [
+                                          {"description":"Minced meat","quantity":1,"unitPrice":8.00,"amount":8.00,"categoryId":%d},
+                                          {"description":"Soap","amount":4.00,"categoryId":%d}
+                                        ]
+                                        """.formatted(meatCategoryId, categoryIdBySlug("toiletries"))
+                        )))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lineItems.length()").value(2))
+                .andExpect(jsonPath("$.lineItems[1].description").value("Soap"))
+                .andExpect(jsonPath("$.lineItems[1].categoryId").value(categoryIdBySlug("toiletries")));
+
+        List<ExpenseLine> lines = expenseLineRepository.findByExpenseIdOrderByPositionAsc(expenseId);
+        assertEquals(2, lines.size());
+        assertEquals(categoryIdBySlug("toiletries"), lines.get(1).getCategoryId());
+
+        // Empty list clears confirmed lines without deleting the expense.
+        mockMvc.perform(put("/expenses/" + expenseId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(writeJson("Lidl", "2026-03-05", "47.00", foodCategoryId, "[]")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lineItems.length()").value(0));
+
+        assertTrue(expenseLineRepository.findByExpenseIdOrderByPositionAsc(expenseId).isEmpty());
+        assertTrue(expenseRepository.existsById(expenseId));
+    }
+
+    @Test
+    void put_invalidLine_returns400AndKeepsPreviousLines() throws Exception {
+        String token = registerAndLogin(uniqueEmail, "password123");
+        long documentId = uploadAndContinueManual(token);
+
+        MvcResult approveResult = mockMvc.perform(post("/documents/" + documentId + "/approve")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(approveJson(
+                                "Shop",
+                                "2026-03-06",
+                                "10.00",
+                                foodCategoryId,
+                                "[{\"description\":\"Bread\",\"amount\":3.00,\"categoryId\":%d}]"
+                                        .formatted(meatCategoryId)
+                        )))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        long expenseId = objectMapper.readTree(approveResult.getResponse().getContentAsString()).get("id").asLong();
+
+        mockMvc.perform(put("/expenses/" + expenseId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(writeJson(
+                                "Shop",
+                                "2026-03-06",
+                                "10.00",
+                                foodCategoryId,
+                                "[{\"description\":\"\",\"amount\":1.00}]"
+                        )))
+                .andExpect(status().isBadRequest());
+
+        List<ExpenseLine> lines = expenseLineRepository.findByExpenseIdOrderByPositionAsc(expenseId);
+        assertEquals(1, lines.size());
+        assertEquals("Bread", lines.get(0).getDescription());
+        assertEquals(meatCategoryId, lines.get(0).getCategoryId());
+    }
+
     private void seedExtractionProposal(long documentId, String description) {
         DocumentExtraction extraction = documentExtractionRepository.findByDocumentId(documentId)
                 .orElseThrow();
@@ -377,5 +496,16 @@ class ExpenseLinesIntegrationTest {
                   "lineItems": %s
                 }
                 """.formatted(merchant, date, amount, categoryId, lineItemsJson);
+    }
+
+    /** Same shape as approve — used for PUT /expenses/{id}. */
+    private static String writeJson(
+            String merchant,
+            String date,
+            String amount,
+            long categoryId,
+            String lineItemsJson
+    ) {
+        return approveJson(merchant, date, amount, categoryId, lineItemsJson);
     }
 }

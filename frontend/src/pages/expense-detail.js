@@ -1,14 +1,16 @@
 /**
- * Main Responsibility: Expense detail page — preview, edit fields, and unapprove.
+ * Main Responsibility: Expense detail page — preview, edit fields/lines, unapprove.
  *
- * Loads GET /expenses/{id} and GET /categories. The category dropdown lists
- * top-level groups only. Save uses PUT /expenses/{id}.
+ * Loads GET /expenses/{id} and GET /categories. The header category dropdown
+ * lists top-level groups only. Line items reuse review-items.js (same CSS).
+ * Save uses PUT /expenses/{id} with header fields plus the form line list.
  * Unapprove uses DELETE /expenses/{id} (expense gone; document → pending inbox),
  * then navigates to #/expenses with a short notice. Preview uses authenticated blob fetch.
  */
 import { api, apiBlob } from '../api.js';
 import { isLoggedIn } from '../auth.js';
 import { navigate } from '../router.js';
+import { createReviewItemsEditor } from './review-items.js';
 
 /** Product is EUR-only; column stays, UI no longer offers USD/GBP. */
 const CURRENCY = 'EUR';
@@ -74,11 +76,24 @@ export function renderExpenseDetailPage(root, expenseId) {
               <dd id="field-filename"></dd>
             </dl>
             <div class="review-actions">
-              <button type="submit" id="save-btn">Save changes</button>
+              <button type="submit" id="save-btn" class="button-primary">Save changes</button>
               <button type="button" id="unapprove-btn" class="button-danger">Unapprove</button>
             </div>
             <p id="expense-action-status" class="categories-status"></p>
           </form>
+        </section>
+
+        <!-- Full-width under preview+form; same Items card as review. -->
+        <section class="review-items" aria-labelledby="expense-items-heading">
+          <h2 id="expense-items-heading">Items</h2>
+          <div id="expense-items-list"></div>
+          <div class="review-items-footer">
+            <button type="button" id="expense-add-item-btn">Add item</button>
+            <div class="review-items-totals">
+              <p id="expense-items-sum" class="review-items-sum"></p>
+              <p id="expense-items-mismatch" class="review-items-mismatch" hidden></p>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -97,9 +112,21 @@ export function renderExpenseDetailPage(root, expenseId) {
   const fileMetaEl = root.querySelector('#expense-file-meta');
   const formEl = root.querySelector('#expense-edit-form');
   const categorySelectEl = formEl.querySelector('select[name="categoryId"]');
+  const amountInputEl = formEl.querySelector('input[name="totalAmount"]');
   const saveBtn = root.querySelector('#save-btn');
   const unapproveBtn = root.querySelector('#unapprove-btn');
   const actionStatusEl = root.querySelector('#expense-action-status');
+
+  const itemsEditor = createReviewItemsEditor({
+    listEl: root.querySelector('#expense-items-list'),
+    sumEl: root.querySelector('#expense-items-sum'),
+    mismatchEl: root.querySelector('#expense-items-mismatch'),
+    addBtn: root.querySelector('#expense-add-item-btn'),
+    amountInputEl,
+    currency: CURRENCY,
+    mismatchHint:
+      'Line items and receipt total differ. That can be a discount, deposit, or tip — Save is still allowed.',
+  });
 
   formEl.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -121,6 +148,7 @@ export function renderExpenseDetailPage(root, expenseId) {
         api('/categories'),
       ]);
 
+      itemsEditor.setCategories(categories);
       populateCategoryOptions(categories, expense);
       applyExpenseToForm(expense);
       contentEl.hidden = false;
@@ -140,7 +168,7 @@ export function renderExpenseDetailPage(root, expenseId) {
   }
 
   function populateCategoryOptions(categories, expense) {
-    // Whole-expense category is a group. Leaves are chosen on a line later.
+    // Whole-expense category is a group. Leaves are chosen on a line below.
     const groups = categories.filter((category) => category.parentId == null);
     const options = groups
       .map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`)
@@ -174,6 +202,7 @@ export function renderExpenseDetailPage(root, expenseId) {
     fileMetaEl.textContent = expense.originalFilename
       ? `File: ${expense.originalFilename}`
       : '';
+    itemsEditor.loadFromExtraction(expense.lineItems);
   }
 
   async function loadPreview(expense) {
@@ -201,6 +230,10 @@ export function renderExpenseDetailPage(root, expenseId) {
     }
   }
 
+  /**
+   * PUT header fields and the Items list. Empty list is allowed.
+   * A qty×price mismatch does not block Save.
+   */
   async function runSave() {
     errorEl.hidden = true;
     actionStatusEl.textContent = '';
@@ -223,6 +256,13 @@ export function renderExpenseDetailPage(root, expenseId) {
       return;
     }
 
+    const lines = itemsEditor.linesForApprove();
+    if (lines.error) {
+      errorEl.textContent = lines.error;
+      errorEl.hidden = false;
+      return;
+    }
+
     actionStatusEl.textContent = 'Saving...';
     saveBtn.disabled = true;
     unapproveBtn.disabled = true;
@@ -236,6 +276,7 @@ export function renderExpenseDetailPage(root, expenseId) {
           currency: CURRENCY,
           categoryId: Number(categoryIdRaw),
           merchant: merchant || null,
+          lineItems: lines.lineItems,
         }),
       });
       applyExpenseToForm(updated);

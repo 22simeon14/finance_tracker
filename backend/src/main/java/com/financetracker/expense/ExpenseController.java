@@ -57,8 +57,8 @@ public class ExpenseController {
     }
 
     /**
-     * Update confirmed fields on an owned expense. Same validation as approve.
-     * Missing/foreign → 404; inactive category / bad body → 400.
+     * Update confirmed header fields and replace expense_lines. Same validation
+     * as approve. Missing/foreign → 404; inactive category / bad line → 400.
      */
     @PutMapping("/{id}")
     public ExpenseViewResponse update(
