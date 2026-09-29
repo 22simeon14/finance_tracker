@@ -1,31 +1,49 @@
 package com.financetracker.dashboard;
 
+import com.financetracker.category.Category;
+import com.financetracker.category.CategoryRepository;
+import com.financetracker.expense.Expense;
+import com.financetracker.expense.ExpenseLine;
+import com.financetracker.expense.ExpenseLineRepository;
 import com.financetracker.expense.ExpenseRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Main Responsibility: Build owner-scoped dashboard aggregates from expenses.
  *
- * Reads ExpenseRepository SUM queries only — never document_extractions.
+ * Reads ExpenseRepository SUM queries for currency / merchant.
+ * Line breakdown (byLeafCategory / byParentCategory) loads expenses + lines and
+ * uses CategoryBreakdownCalculator — never document_extractions.
  * Optional from/to dates are inclusive on expense_date (same as expense list).
  */
 @Service
 public class DashboardService {
 
     private final ExpenseRepository expenseRepository;
+    private final ExpenseLineRepository expenseLineRepository;
+    private final CategoryRepository categoryRepository;
 
-    public DashboardService(ExpenseRepository expenseRepository) {
+    public DashboardService(
+            ExpenseRepository expenseRepository,
+            ExpenseLineRepository expenseLineRepository,
+            CategoryRepository categoryRepository
+    ) {
         this.expenseRepository = expenseRepository;
+        this.expenseLineRepository = expenseLineRepository;
+        this.categoryRepository = categoryRepository;
     }
 
     /**
-     * Return totals by currency, category, and merchant for this user.
-     * Empty expense set → three empty lists (not null).
+     * Return totals by currency, line breakdown, and merchant.
+     * Empty expense set → empty lists (not null).
      * Date filters use boolean flags + sentinel dates (same as expense list).
      */
     @Transactional(readOnly = true)
@@ -44,16 +62,13 @@ public class DashboardService {
                 ))
                 .toList();
 
-        List<CategoryTotalResponse> byCategory = expenseRepository
-                .sumByCategory(userId, hasFromDate, fromDate, hasToDate, toDate)
-                .stream()
-                .map(row -> new CategoryTotalResponse(
-                        toLong(row[0]),
-                        (String) row[1],
-                        (String) row[2],
-                        toBigDecimal(row[3])
-                ))
-                .toList();
+        CategoryBreakdownCalculator.Result lineBreakdown = buildLineBreakdown(
+                userId,
+                hasFromDate,
+                fromDate,
+                hasToDate,
+                toDate
+        );
 
         List<MerchantTotalResponse> byMerchant = expenseRepository
                 .sumByMerchant(userId, hasFromDate, fromDate, hasToDate, toDate)
@@ -65,18 +80,53 @@ public class DashboardService {
                 ))
                 .toList();
 
-        return new DashboardResponse(totalsByCurrency, byCategory, byMerchant);
+        return new DashboardResponse(
+                totalsByCurrency,
+                lineBreakdown.byLeafCategory(),
+                lineBreakdown.byParentCategory(),
+                byMerchant
+        );
     }
 
-    /** Aggregate id columns may arrive as Long or another Number. */
-    private static Long toLong(Object value) {
-        if (value instanceof Long longValue) {
-            return longValue;
+    /**
+     * Load period expenses + their lines and run the leaf/parent calculator.
+     * Categories include inactive rows so names still resolve after deactivation.
+     */
+    private CategoryBreakdownCalculator.Result buildLineBreakdown(
+            Long userId,
+            boolean hasFromDate,
+            LocalDate fromDate,
+            boolean hasToDate,
+            LocalDate toDate
+    ) {
+        List<Expense> expenses = expenseRepository.findAllByUserIdFiltered(
+                userId,
+                hasFromDate,
+                fromDate,
+                hasToDate,
+                toDate,
+                false,
+                0L,
+                false,
+                ""
+        );
+
+        if (expenses.isEmpty()) {
+            return new CategoryBreakdownCalculator.Result(List.of(), List.of());
         }
-        if (value instanceof Number number) {
-            return number.longValue();
+
+        List<Long> expenseIds = expenses.stream().map(Expense::getId).toList();
+        Map<Long, List<ExpenseLine>> linesByExpenseId = expenseLineRepository
+                .findByExpenseIdIn(expenseIds)
+                .stream()
+                .collect(Collectors.groupingBy(ExpenseLine::getExpenseId));
+
+        Map<Long, Category> categoriesById = new HashMap<>();
+        for (Category category : categoryRepository.findAll()) {
+            categoriesById.put(category.getId(), category);
         }
-        throw new IllegalStateException("Expected numeric category id, got: " + value);
+
+        return CategoryBreakdownCalculator.compute(expenses, linesByExpenseId, categoriesById);
     }
 
     /**

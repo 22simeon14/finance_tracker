@@ -12,7 +12,8 @@ import java.time.LocalDate;
  * Main Responsibility: Expose authenticated GET /dashboard aggregates.
  *
  * User id always comes from JWT via CurrentUser. Optional from/to filter
- * expense_date inclusively. No SecurityConfig change needed (authenticated).
+ * expense_date inclusively. Response includes currency/merchant totals plus
+ * the line leaf/parent breakdown. No SecurityConfig change needed.
  */
 @RestController
 @RequestMapping("/dashboard")

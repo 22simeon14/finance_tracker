@@ -81,30 +81,6 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     );
 
     /**
-     * Sum amounts grouped by category and currency.
-     * Rows are Object[]: [categoryId Long, categoryName String, currency String, totalAmount Number].
-     * Joins Category so inactive categories still show their name.
-     * Highest total first; name/currency break ties.
-     */
-    @Query("""
-            SELECT e.categoryId, c.name, e.currency, SUM(e.totalAmount)
-            FROM Expense e, Document d, Category c
-            WHERE e.documentId = d.id AND d.userId = :userId
-              AND e.categoryId = c.id
-              AND (:hasFromDate = false OR e.expenseDate >= :fromDate)
-              AND (:hasToDate = false OR e.expenseDate <= :toDate)
-            GROUP BY e.categoryId, c.name, e.currency
-            ORDER BY SUM(e.totalAmount) DESC, c.name ASC, e.currency ASC
-            """)
-    List<Object[]> sumByCategory(
-            @Param("userId") Long userId,
-            @Param("hasFromDate") boolean hasFromDate,
-            @Param("fromDate") LocalDate fromDate,
-            @Param("hasToDate") boolean hasToDate,
-            @Param("toDate") LocalDate toDate
-    );
-
-    /**
      * Sum amounts grouped by merchant and currency.
      * Null or blank merchant is one bucket labeled '(none)'.
      * Rows are Object[]: [merchant String, currency String, totalAmount Number].
